@@ -1,0 +1,14 @@
+{
+  "name": "blog-ia-nodejs",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "node --watch src/index.ts",
+    "typecheck": "tsc"
+  },
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
