@@ -12,5 +12,10 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@mastra/core": "^1.83.0",
+    "nanoid": "^6.0.2",
+    "zod": "^4.6.7"
   }
 }
