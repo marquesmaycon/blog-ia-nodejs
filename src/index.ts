@@ -1,14 +1,13 @@
 import { createServer } from 'node:http';
+import { z } from "zod"
+
+import { createPostDraft, posts } from "./services/posts.ts"
 
 const { API_PORT, API_HOST, API_PROTOCOL } = process.env
 
-type Post = {
-  id: number
-  title: string
-  content: string
-}
-
-const posts: Post[] = []
+const createPostDraftBodySchema = z.object({
+  idea: z.string().trim().min(1)
+})
 
 const server = createServer((req, res) => {
   const { url, method } = req
@@ -20,17 +19,37 @@ const server = createServer((req, res) => {
     return res.end(JSON.stringify({ data: posts }))
   }
 
-  if (path === "/posts" && method === "POST") {
+  if (path === "/posts/draft" && method === "POST") {
     const bodyBuffer: Buffer[] = []
 
-    // Armazena o corpo da requisição em um array
     req.on("data", (chunk: Buffer) => bodyBuffer.push(chunk))
-    req.on("end", () => {
+    req.on("end", async () => {
       const bodyString = Buffer.concat(bodyBuffer).toString()
-      const body: unknown = JSON.parse(bodyString)
 
-      res.writeHead(201, { "Content-Type": "application/json" })
-      return res.end(JSON.stringify({ message: "Post created", body }))
+      let body: unknown
+      try {
+        body = JSON.parse(bodyString)
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        return res.end(JSON.stringify({ message: "Invalid JSON body" }))
+      }
+
+      const parsed = createPostDraftBodySchema.safeParse(body)
+      if (!parsed.success) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        return res.end(JSON.stringify({ message: "Field 'idea' is required" }))
+      }
+
+      try {
+        const post = await createPostDraft(parsed.data.idea)
+
+        res.writeHead(201, { "Content-Type": "application/json" })
+        return res.end(JSON.stringify({ message: "Post draft created", data: post }))
+      } catch (error) {
+        console.error("Falha ao gerar o post:", error)
+        res.writeHead(502, { "Content-Type": "application/json" })
+        return res.end(JSON.stringify({ message: "Failed to generate post" }))
+      }
     })
 
     return
