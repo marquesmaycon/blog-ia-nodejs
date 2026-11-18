@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": false,
+  "trailingComma": "none",
+  "printWidth": 100,
+  "endOfLine": "lf",
+  "ignorePatterns": ["package-lock.json"]
+}
