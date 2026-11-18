@@ -1,6 +1,8 @@
 {
   "name": "blog-ia-nodejs",
   "version": "1.0.0",
+  "license": "ISC",
+  "type": "module",
   "scripts": {
     "dev": "node --env-file=.env.local --watch src/index.ts",
     "env:setup": "node -e \"if (!fs.existsSync('.env.local')) fs.copyFileSync('.env.example', '.env.local')\"",
@@ -9,20 +11,32 @@
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
     "migrate:up": "postgrator",
-    "migrate:down": "postgrator 0"
-  },
-  "license": "ISC",
-  "type": "module",
-  "devDependencies": {
-    "@types/node": "^26.6.6",
-    "@types/pg": "^8.23.1",
-    "postgrator-cli": "^10.0.0",
-    "typescript": "^7.0.2"
+    "migrate:down": "postgrator 0",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "prepare": "lefthook install"
   },
   "dependencies": {
     "@mastra/core": "^1.83.0",
     "nanoid": "^6.0.2",
     "pg": "^8.23.1",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "lefthook": "^2.2.2",
+    "lint-staged": "^17.6.1",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
+    "postgrator-cli": "^10.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=26"
   }
 }
