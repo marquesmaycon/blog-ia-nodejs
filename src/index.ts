@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer } from "node:http"
 import { z } from "zod"
 
 import { createPostDraft, listPosts } from "./services/posts.ts"
@@ -65,7 +65,7 @@ const server = createServer(async (req, res) => {
 
   res.writeHead(404, { "Content-Type": "application/json" })
   return res.end(JSON.stringify({ message: "Not Found" }))
-});
+})
 
 server.listen(Number(API_PORT ?? 8080), API_HOST, () => {
   console.log(`Server running on ${API_PROTOCOL}://${API_HOST}:${API_PORT}`)
