@@ -11,11 +11,14 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "postgrator-cli": "^10.0.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@mastra/core": "^1.83.0",
     "nanoid": "^6.0.2",
+    "pg": "^8.23.1",
     "zod": "^4.6.7"
   }
 }
