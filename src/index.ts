@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { z } from "zod"
 
-import { createPostDraft, posts } from "./services/posts.ts"
+import { createPostDraft, listPosts } from "./services/posts.ts"
 
 const { API_PORT, API_HOST, API_PROTOCOL } = process.env
 
@@ -9,14 +9,22 @@ const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
 })
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   const { url, method } = req
   const paths = url?.split("?").filter(Boolean)
   const path = paths?.at(0) || "/"
 
   if (path === "/posts" && method === "GET") {
-    res.writeHead(200, { "Content-Type": "application/json" })
-    return res.end(JSON.stringify({ data: posts }))
+    try {
+      const posts = await listPosts()
+
+      res.writeHead(200, { "Content-Type": "application/json" })
+      return res.end(JSON.stringify({ data: posts }))
+    } catch (error) {
+      console.error("Falha ao listar os posts:", error)
+      res.writeHead(500, { "Content-Type": "application/json" })
+      return res.end(JSON.stringify({ message: "Failed to list posts" }))
+    }
   }
 
   if (path === "/posts/draft" && method === "POST") {
