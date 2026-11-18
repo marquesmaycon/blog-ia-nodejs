@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "node --env-file=.env.local --watch src/index.ts",
-    "env:setup": "cp .env.example .env.local",
-    "local:setup": "npm run env:setup",
-    "typecheck": "tsc"
+    "env:setup": "node -e \"if (!fs.existsSync('.env.local')) fs.copyFileSync('.env.example', '.env.local')\"",
+    "local:setup": "npm run env:setup && npm run infra:up && npm run migrate:up",
+    "typecheck": "tsc",
+    "infra:up": "docker compose up -d --wait",
+    "infra:down": "docker compose down",
+    "migrate:up": "postgrator",
+    "migrate:down": "postgrator 0"
   },
   "license": "ISC",
   "type": "module",
