@@ -23,6 +23,14 @@ export async function findAllPosts(): Promise<Post[]> {
   return rows
 }
 
+export async function findApprovedPosts(): Promise<Post[]> {
+  const { rows } = await pool.query<Post>(
+    `SELECT ${POST_COLUMNS} FROM posts WHERE approved_at IS NOT NULL ORDER BY published_at DESC`
+  )
+
+  return rows
+}
+
 export async function findPostById(id: string): Promise<Post | null> {
   const { rows } = await pool.query<Post>(`SELECT ${POST_COLUMNS} FROM posts WHERE id = $1`, [id])
 

@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
+import { hasValidApiKey } from "../http/auth.ts"
 import { approvePost, createPostDraft, getPost, listPosts, rejectPost } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
@@ -8,9 +9,21 @@ const createPostDraftBodySchema = z.object({
 })
 
 export function registerPostRoutes(app: App) {
-  app.get("/posts", async (_req, res) => {
+  app.get("/posts", async (req, res) => {
+    const include = req.query.get("include")
+
+    if (include !== null && include !== "all") {
+      return res.status(400).send({ message: "Invalid value for 'include'" })
+    }
+
+    const includeAll = include === "all"
+
+    if (includeAll && !hasValidApiKey(req)) {
+      return res.status(403).send({ message: "Forbidden" })
+    }
+
     try {
-      const posts = await listPosts()
+      const posts = await listPosts({ includeAll })
       return res.send({ data: posts })
     } catch (error) {
       console.error("Falha ao listar os posts:", error)

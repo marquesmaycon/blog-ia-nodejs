@@ -5,6 +5,7 @@ import { mastra } from "../mastra/index.ts"
 import {
   approvePostById,
   findAllPosts,
+  findApprovedPosts,
   findPostById,
   insertPost,
   rejectPostById,
@@ -16,8 +17,8 @@ const generatedPostSchema = z.object({
   content: z.string().min(1).describe("Corpo completo do post em Markdown")
 })
 
-export async function listPosts(): Promise<Post[]> {
-  return findAllPosts()
+export async function listPosts({ includeAll = false } = {}): Promise<Post[]> {
+  return includeAll ? findAllPosts() : findApprovedPosts()
 }
 
 export async function getPost(id: string): Promise<Post | null> {
