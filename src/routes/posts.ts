@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { approvePost, createPostDraft, getPost, listPosts } from "../services/posts.ts"
+import { approvePost, createPostDraft, getPost, listPosts, rejectPost } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
@@ -45,6 +45,21 @@ export function registerPostRoutes(app: App) {
     } catch (error) {
       console.error("Falha ao aprovar o post:", error)
       return res.status(500).send({ message: "Failed to approve post" })
+    }
+  })
+
+  app.delete("/posts/:id/reject", async (req, res) => {
+    try {
+      const post = await rejectPost(req.params.id)
+
+      if (!post) {
+        return res.status(404).send({ message: "Post not found" })
+      }
+
+      return res.send({ message: "Post rejected", data: post })
+    } catch (error) {
+      console.error("Falha ao reprovar o post:", error)
+      return res.status(500).send({ message: "Failed to reject post" })
     }
   })
 

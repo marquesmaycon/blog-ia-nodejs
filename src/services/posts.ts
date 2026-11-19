@@ -7,6 +7,7 @@ import {
   findAllPosts,
   findPostById,
   insertPost,
+  rejectPostById,
   type Post
 } from "../repositories/posts.ts"
 
@@ -34,4 +35,8 @@ export async function createPostDraft(idea: string): Promise<Post> {
 
 export async function approvePost(id: string): Promise<Post | null> {
   return approvePostById(id)
+}
+
+export async function rejectPost(id: string): Promise<Post | null> {
+  return rejectPostById(id)
 }

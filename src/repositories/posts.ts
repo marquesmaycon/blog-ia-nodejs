@@ -43,7 +43,19 @@ export async function insertPost({ title, content }: NewPost): Promise<Post> {
 export async function approvePostById(id: string): Promise<Post | null> {
   const { rows } = await pool.query<Post>(
     `UPDATE posts
-     SET approved_at = now(), published_at = now()
+     SET approved_at = now(), published_at = now(), rejected_at = NULL
+     WHERE id = $1
+     RETURNING ${POST_COLUMNS}`,
+    [id]
+  )
+
+  return rows[0] ?? null
+}
+
+export async function rejectPostById(id: string): Promise<Post | null> {
+  const { rows } = await pool.query<Post>(
+    `UPDATE posts
+     SET rejected_at = now(), approved_at = NULL
      WHERE id = $1
      RETURNING ${POST_COLUMNS}`,
     [id]
