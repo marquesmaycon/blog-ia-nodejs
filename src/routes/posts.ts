@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { createPostDraft, getPost, listPosts } from "../services/posts.ts"
+import { approvePost, createPostDraft, getPost, listPosts } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
@@ -30,6 +30,21 @@ export function registerPostRoutes(app: App) {
     } catch (error) {
       console.error("Falha ao buscar o post:", error)
       return res.status(500).send({ message: "Failed to get post" })
+    }
+  })
+
+  app.patch("/posts/:id/approve", async (req, res) => {
+    try {
+      const post = await approvePost(req.params.id)
+
+      if (!post) {
+        return res.status(404).send({ message: "Post not found" })
+      }
+
+      return res.send({ message: "Post approved", data: post })
+    } catch (error) {
+      console.error("Falha ao aprovar o post:", error)
+      return res.status(500).send({ message: "Failed to approve post" })
     }
   })
 
