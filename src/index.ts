@@ -1,7 +1,7 @@
 import { createServer } from "node:http"
 import { z } from "zod"
 
-import { createPostDraft, listPosts } from "./services/posts.ts"
+import { createPostDraft, getPost, listPosts } from "./services/posts.ts"
 
 const { API_PORT, API_HOST, API_PROTOCOL } = process.env
 
@@ -24,6 +24,27 @@ const server = createServer(async (req, res) => {
       console.error("Falha ao listar os posts:", error)
       res.writeHead(500, { "Content-Type": "application/json" })
       return res.end(JSON.stringify({ message: "Failed to list posts" }))
+    }
+  }
+
+  const postIdMatch = path.match(/^\/posts\/([^/]+)$/)
+  if (postIdMatch && method === "GET") {
+    const id = postIdMatch[1]
+
+    try {
+      const post = await getPost(id)
+
+      if (!post) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        return res.end(JSON.stringify({ message: "Post not found" }))
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" })
+      return res.end(JSON.stringify({ data: post }))
+    } catch (error) {
+      console.error("Falha ao buscar o post:", error)
+      res.writeHead(500, { "Content-Type": "application/json" })
+      return res.end(JSON.stringify({ message: "Failed to get post" }))
     }
   }
 

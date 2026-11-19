@@ -2,7 +2,7 @@ import { z } from "zod"
 
 import { POST_WRITER_AGENT_ID } from "../mastra/agents/post-writer.ts"
 import { mastra } from "../mastra/index.ts"
-import { findAllPosts, insertPost, type Post } from "../repositories/posts.ts"
+import { findAllPosts, findPostById, insertPost, type Post } from "../repositories/posts.ts"
 
 const generatedPostSchema = z.object({
   title: z.string().min(1).describe("Título do post, curto e chamativo"),
@@ -11,6 +11,10 @@ const generatedPostSchema = z.object({
 
 export async function listPosts(): Promise<Post[]> {
   return findAllPosts()
+}
+
+export async function getPost(id: string): Promise<Post | null> {
+  return findPostById(id)
 }
 
 export async function createPostDraft(idea: string): Promise<Post> {

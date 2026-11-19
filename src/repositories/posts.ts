@@ -23,6 +23,12 @@ export async function findAllPosts(): Promise<Post[]> {
   return rows
 }
 
+export async function findPostById(id: string): Promise<Post | null> {
+  const { rows } = await pool.query<Post>(`SELECT ${POST_COLUMNS} FROM posts WHERE id = $1`, [id])
+
+  return rows[0] ?? null
+}
+
 export async function insertPost({ title, content }: NewPost): Promise<Post> {
   const { rows } = await pool.query<Post>(
     `INSERT INTO posts (id, title, content)
