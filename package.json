@@ -8,6 +8,7 @@
     "env:setup": "node -e \"if (!fs.existsSync('.env.local')) fs.copyFileSync('.env.example', '.env.local')\"",
     "local:setup": "npm run env:setup && npm run infra:up && npm run migrate:up",
     "typecheck": "tsc",
+    "build": "npm run typecheck && docker build -t blog-ia-nodejs:latest .",
     "infra:up": "docker compose up -d --wait",
     "infra:down": "docker compose down",
     "migrate:up": "postgrator",
