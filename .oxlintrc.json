@@ -6,7 +6,8 @@
     "suspicious": "warn"
   },
   "rules": {
-    "import/no-named-as-default-member": "off"
+    "import/no-named-as-default-member": "off",
+    "oxc/no-async-endpoint-handlers": "off"
   },
   "env": {
     "builtin": true,
