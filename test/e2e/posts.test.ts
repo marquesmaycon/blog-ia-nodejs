@@ -1,0 +1,164 @@
+// Fluxo completo pela API HTTP (supertest), com Postgres real (banco blog_test).
+// Só o LLM é substituído: chamar o provedor de verdade deixaria o teste lento, caro e
+// não determinístico. O mock é feito no mastra.getAgent, a fronteira com o serviço externo.
+import assert from "node:assert/strict"
+import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
+
+import request from "supertest"
+
+import { createApp } from "../../src/http/app.ts"
+import { mastra } from "../../src/mastra/index.ts"
+import type { Post } from "../../src/repositories/posts.ts"
+import { registerPostRoutes } from "../../src/routes/posts.ts"
+import { pool, truncatePosts } from "../helpers/db.ts"
+
+const API_KEY = process.env.API_KEY ?? ""
+const auth = { Authorization: `Bearer ${API_KEY}` }
+
+const app = createApp()
+registerPostRoutes(app)
+const api = () => request(app.server)
+
+function mockPostWriter(generate: () => Promise<unknown>) {
+  return mock.method(mastra, "getAgent", (() => ({ generate })) as never)
+}
+
+function mockGeneratedPost(title: string, content = `## ${title}\n\nConteúdo.`) {
+  return mockPostWriter(async () => ({ object: { title, content } }))
+}
+
+async function createDraft(idea: string): Promise<Post> {
+  mockGeneratedPost(`Post sobre ${idea}`)
+  const res = await api().post("/posts/draft").send({ idea }).expect(201)
+  return res.body.data
+}
+
+describe("E2E /posts", () => {
+  beforeEach(truncatePosts)
+  afterEach(() => mock.restoreAll())
+  after(() => pool.end())
+
+  it("ciclo de vida: rascunho → aprovado → reprovado", async () => {
+    // 1. Gera o rascunho
+    mockGeneratedPost("Testes com node:test", "## Intro\n\nTexto.")
+    const created = await api().post("/posts/draft").send({ idea: "testes no node" }).expect(201)
+
+    const draft: Post = created.body.data
+    assert.equal(created.body.message, "Post draft created")
+    assert.equal(draft.title, "Testes com node:test")
+    assert.equal(draft.content, "## Intro\n\nTexto.")
+    assert.equal(draft.approved_at, null)
+
+    // 2. Rascunho não aparece na listagem pública, mas aparece com include=all
+    assert.deepEqual((await api().get("/posts").expect(200)).body, { data: [] })
+
+    const all = await api().get("/posts?include=all").set(auth).expect(200)
+    assert.deepEqual(
+      all.body.data.map((post: Post) => post.id),
+      [draft.id]
+    )
+
+    // 3. Busca direta pelo id funciona mesmo sendo rascunho
+    const fetched = await api().get(`/posts/${draft.id}`).expect(200)
+    assert.deepEqual(fetched.body.data, draft)
+
+    // 4. Aprova: passa a aparecer na listagem pública
+    const approved = await api().patch(`/posts/${draft.id}/approve`).expect(200)
+    assert.equal(approved.body.message, "Post approved")
+    assert.ok(approved.body.data.approved_at)
+
+    const publicList = await api().get("/posts").expect(200)
+    assert.deepEqual(
+      publicList.body.data.map((post: Post) => post.id),
+      [draft.id]
+    )
+
+    // 5. Reprova: some da listagem pública, continua existindo
+    const rejected = await api().delete(`/posts/${draft.id}/reject`).expect(200)
+    assert.equal(rejected.body.message, "Post rejected")
+    assert.equal(rejected.body.data.approved_at, null)
+    assert.ok(rejected.body.data.rejected_at)
+
+    assert.deepEqual((await api().get("/posts").expect(200)).body, { data: [] })
+    await api().get(`/posts/${draft.id}`).expect(200)
+
+    // 6. Pode ser aprovado de novo
+    const reapproved = await api().patch(`/posts/${draft.id}/approve`).expect(200)
+    assert.equal(reapproved.body.data.rejected_at, null)
+  })
+
+  it("listagem pública traz só aprovados, do mais recente para o mais antigo", async () => {
+    const first = await createDraft("primeiro")
+    const second = await createDraft("segundo")
+    await createDraft("rascunho")
+
+    await api().patch(`/posts/${first.id}/approve`).expect(200)
+    await api().patch(`/posts/${second.id}/approve`).expect(200)
+
+    const res = await api().get("/posts").expect(200)
+
+    assert.deepEqual(
+      res.body.data.map((post: Post) => post.id),
+      [second.id, first.id]
+    )
+  })
+
+  describe("autorização de include=all", () => {
+    it("responde 403 sem API key", async () => {
+      await api().get("/posts?include=all").expect(403, { message: "Forbidden" })
+    })
+
+    it("responde 403 com API key errada", async () => {
+      await api().get("/posts?include=all").set("Authorization", "Bearer errada").expect(403)
+    })
+
+    it("responde 400 para valor inválido de include", async () => {
+      await api().get("/posts?include=tudo").set(auth).expect(400)
+    })
+  })
+
+  describe("erros", () => {
+    it("responde 404 para post inexistente em todas as rotas por id", async () => {
+      const notFound = { message: "Post not found" }
+
+      await api().get("/posts/inexistente").expect(404, notFound)
+      await api().patch("/posts/inexistente/approve").expect(404, notFound)
+      await api().delete("/posts/inexistente/reject").expect(404, notFound)
+    })
+
+    it("responde 404 para rota inexistente", async () => {
+      await api().get("/nada").expect(404, { message: "Not Found" })
+    })
+
+    it("responde 400 para JSON inválido", async () => {
+      await api()
+        .post("/posts/draft")
+        .set("Content-Type", "application/json")
+        .send("{idea")
+        .expect(400, { message: "Invalid JSON body" })
+    })
+
+    it("responde 400 sem a ideia e não chama o LLM", async () => {
+      const getAgent = mockGeneratedPost("não deveria gerar")
+
+      await api().post("/posts/draft").send({ idea: "" }).expect(400)
+
+      assert.equal(getAgent.mock.callCount(), 0)
+    })
+
+    it("responde 502 quando o LLM falha e não persiste nada", async (t) => {
+      t.mock.method(console, "error", () => {})
+      mockPostWriter(async () => {
+        throw new Error("LLM indisponível")
+      })
+
+      await api()
+        .post("/posts/draft")
+        .send({ idea: "qualquer" })
+        .expect(502, { message: "Failed to generate post" })
+
+      const all = await api().get("/posts?include=all").set(auth).expect(200)
+      assert.deepEqual(all.body.data, [])
+    })
+  })
+})
