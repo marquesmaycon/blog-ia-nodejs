@@ -72,18 +72,23 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 
 ### Scripts
 
-| Script                 | O que faz                                              |
-| ---------------------- | ------------------------------------------------------ |
-| `npm run dev`          | Sobe a API em modo watch, lendo o `.env.local`         |
-| `npm run local:setup`  | Cria o `.env.local`, sobe o Postgres e roda migrations |
-| `npm run infra:up`     | Sobe o Postgres (`docker compose up -d --wait`)        |
-| `npm run infra:down`   | Derruba o Postgres (o volume de dados é mantido)       |
-| `npm run migrate:up`   | Aplica todas as migrations pendentes                   |
-| `npm run migrate:down` | Reverte todas as migrations                            |
-| `npm run typecheck`    | Checagem de tipos com `tsc`                            |
-| `npm run lint`         | Lint com `oxlint` (`lint:fix` corrige)                 |
-| `npm run format`       | Formata com `oxfmt` (`format:check` só verifica)       |
-| `npm run build`        | Typecheck e build da imagem Docker                     |
+| Script                     | O que faz                                              |
+| -------------------------- | ------------------------------------------------------ |
+| `npm run dev`              | Sobe a API em modo watch, lendo o `.env.local`         |
+| `npm run local:setup`      | Cria o `.env.local`, sobe o Postgres e roda migrations |
+| `npm run infra:up`         | Sobe o Postgres (`docker compose up -d --wait`)        |
+| `npm run infra:down`       | Derruba o Postgres (o volume de dados é mantido)       |
+| `npm run migrate:up`       | Aplica todas as migrations pendentes                   |
+| `npm run migrate:down`     | Reverte todas as migrations                            |
+| `npm run typecheck`        | Checagem de tipos com `tsc`                            |
+| `npm run lint`             | Lint com `oxlint` (`lint:fix` corrige)                 |
+| `npm run format`           | Formata com `oxfmt` (`format:check` só verifica)       |
+| `npm run build`            | Typecheck e build da imagem Docker                     |
+| `npm run test`             | Roda unitários, integração e E2E, nessa ordem          |
+| `npm run test:unit`        | Testes unitários (sem banco nem LLM)                   |
+| `npm run test:integration` | Testes de integração contra o Postgres (`blog_test`)   |
+| `npm run test:e2e`         | Testes E2E da API HTTP com `supertest`                 |
+| `npm run test:coverage`    | Todas as suítes com relatório de cobertura             |
 
 Os hooks do `lefthook` são instalados no `npm install`: o pre-commit roda `lint-staged`, o commit-msg valida a mensagem com `commitlint` e o pre-push roda typecheck, lint e checagem de formatação.
 
@@ -175,6 +180,25 @@ curl -X DELETE http://localhost:8080/posts/<id>/reject
 | ------ | ------------------------------------------ |
 | `200`  | `{ message: "Post rejected", data: Post }` |
 | `404`  | Post não encontrado                        |
+
+## Testes
+
+Os testes usam o runner nativo do Node (`node --test`) e o `supertest` para as requisições HTTP. Ficam em `test/`, separados por tipo:
+
+| Tipo       | Pasta               | O que cobre                                                                                         | Dependências externas |
+| ---------- | ------------------- | --------------------------------------------------------------------------------------------------- | --------------------- |
+| Unitário   | `test/unit/`        | Roteador HTTP, auth, rotas e services. Repositório, services e Mastra são mockados                  | nenhuma               |
+| Integração | `test/integration/` | Repositório executando SQL de verdade                                                               | Postgres              |
+| E2E        | `test/e2e/`         | Fluxo completo pela API (rascunho → aprovação → reprovação), com o LLM mockado em `mastra.getAgent` | Postgres              |
+
+Integração e E2E leem o `.env.test` (versionado, sem segredos) e usam o banco `blog_test` no mesmo Postgres do `docker compose`. Antes dos testes, o setup global ([test/setup/database.ts](test/setup/database.ts)) cria o banco, se ainda não existir, e aplica as migrations. Por segurança, ele recusa qualquer banco cujo nome não termine em `_test`, já que os testes truncam a tabela `posts`. Essas suítes rodam com `--test-concurrency=1` porque compartilham o banco.
+
+Os unitários usam `mock.module`, que no Node 26 ainda exige `--experimental-test-module-mocks` (já incluso no script). O aviso `ExperimentalWarning` na saída é esperado.
+
+```bash
+npm run infra:up   # Postgres precisa estar de pé para integração/E2E
+npm test
+```
 
 ## Build
 
