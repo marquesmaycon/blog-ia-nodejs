@@ -19,7 +19,10 @@ src/
 ├── http/
 │   ├── app.ts             # roteador e servidor HTTP
 │   └── auth.ts            # validação da API key (Bearer token)
-├── routes/posts.ts        # rotas /posts
+├── docs/openapi.ts        # especificação OpenAPI
+├── routes/
+│   ├── docs.ts            # rotas /api/docs (Swagger UI) e /api/docs/json
+│   └── posts.ts           # rotas /posts
 ├── services/posts.ts      # regras de negócio e geração via agente
 ├── repositories/posts.ts  # acesso ao Postgres
 ├── mastra/                # instância Mastra e agente post-writer
@@ -95,6 +98,8 @@ Os hooks do `lefthook` são instalados no `npm install`: o pre-commit roda `lint
 ## Endpoints
 
 Todas as respostas são JSON. Em caso de sucesso, o recurso vem em `data`. Em caso de erro, o corpo é `{ "message": "..." }`.
+
+A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
 ### Modelo `Post`
 
