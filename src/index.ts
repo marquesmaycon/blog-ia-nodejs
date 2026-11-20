@@ -1,10 +1,12 @@
 import { createApp } from "./http/app.ts"
+import { registerDocsRoutes } from "./routes/docs.ts"
 import { registerPostRoutes } from "./routes/posts.ts"
 
 const { API_PORT, API_HOST, API_PROTOCOL } = process.env
 
 const app = createApp()
 
+registerDocsRoutes(app)
 registerPostRoutes(app)
 
 app.listen({ port: Number(API_PORT ?? 8080), host: API_HOST }, () => {
