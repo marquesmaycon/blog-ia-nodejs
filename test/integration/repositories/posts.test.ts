@@ -12,7 +12,15 @@ import {
   rejectPostById,
   type Post
 } from "../../../src/repositories/posts.ts"
-import { pool, seedComment, seedLike, seedPost, truncatePosts } from "../../helpers/db.ts"
+import {
+  pool,
+  seedComment,
+  seedLike,
+  seedPost,
+  seedPostTag,
+  seedTag,
+  truncatePosts
+} from "../../helpers/db.ts"
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const APPROVED = { approved_at: "2026-01-01T00:00:00.000Z" }
@@ -21,6 +29,8 @@ const pickCounters = (post: Post | null) => ({
   likes_count: post?.likes_count,
   comments_count: post?.comments_count
 })
+
+const ids = (posts: Post[]) => posts.map((post) => post.id).toSorted()
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
 
@@ -159,6 +169,53 @@ describe("repositories/posts", () => {
       assert.deepEqual(pickCounters((await findApprovedPosts())[0]), expected)
       assert.deepEqual(pickCounters(await rejectPostById(post.id)), expected)
       assert.deepEqual(pickCounters(await approvePostById(post.id)), expected)
+    })
+  })
+
+  describe("tags", () => {
+    it("começam vazias num post novo", async () => {
+      const post = await insertPost({ title: "Título", content: "Conteúdo" })
+
+      assert.deepEqual(post.tags, [])
+    })
+
+    it("vêm ordenadas pelo nome em todas as consultas", async () => {
+      const post = await seedPost(APPROVED)
+      for (const name of ["TypeScript", "IA"]) {
+        const tag = await seedTag({ name })
+        await seedPostTag({ post_id: post.id, tag_id: tag.id })
+      }
+      await seedLike({ post_id: post.id })
+
+      const expected = [
+        { name: "IA", slug: "ia" },
+        { name: "TypeScript", slug: "typescript" }
+      ]
+      assert.deepEqual((await findPostById(post.id))?.tags, expected)
+      assert.deepEqual((await findAllPosts())[0].tags, expected)
+      assert.deepEqual((await findApprovedPosts())[0].tags, expected)
+      assert.deepEqual((await findPopularPosts({ days: 7, limit: 10 }))[0].tags, expected)
+      assert.deepEqual((await rejectPostById(post.id))?.tags, expected)
+    })
+
+    it("filtram a listagem pelo slug, em aprovados e em todos", async () => {
+      const node = await seedTag({ name: "Node.js" })
+      const ia = await seedTag({ name: "IA" })
+      const approvedNode = await seedPost(APPROVED)
+      const draftNode = await seedPost()
+      const approvedIa = await seedPost(APPROVED)
+      await seedPost(APPROVED)
+      await seedPostTag({ post_id: approvedNode.id, tag_id: node.id })
+      await seedPostTag({ post_id: draftNode.id, tag_id: node.id })
+      await seedPostTag({ post_id: approvedIa.id, tag_id: ia.id })
+
+      assert.deepEqual(ids(await findApprovedPosts({ tag: "node-js" })), [approvedNode.id])
+      assert.deepEqual(
+        ids(await findAllPosts({ tag: "node-js" })),
+        [approvedNode.id, draftNode.id].toSorted()
+      )
+      assert.deepEqual(await findApprovedPosts({ tag: "missing" }), [])
+      assert.equal((await findApprovedPosts({})).length, 3)
     })
   })
 

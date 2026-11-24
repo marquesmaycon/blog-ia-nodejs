@@ -1,6 +1,7 @@
 import { pool } from "../../src/db/index.ts"
 import type { Comment } from "../../src/repositories/comments.ts"
-import { POST_COLUMNS, type Post } from "../../src/repositories/posts.ts"
+import { POST_COLUMNS, type Post, type PostTag } from "../../src/repositories/posts.ts"
+import { slugify } from "../../src/utils/slugify.ts"
 
 export { pool }
 
@@ -80,4 +81,20 @@ export async function seedLike({
     visitor_id,
     created_at
   ])
+}
+
+export async function seedTag({
+  name = `Tag ${crypto.randomUUID()}`,
+  slug = slugify(name)
+}: { name?: string; slug?: string } = {}): Promise<PostTag & { id: string }> {
+  const { rows } = await pool.query<PostTag & { id: string }>(
+    "INSERT INTO tags (id, name, slug) VALUES ($1, $2, $3) RETURNING id, name, slug",
+    [`seed-${crypto.randomUUID()}`, name, slug]
+  )
+
+  return rows[0]
+}
+
+export async function seedPostTag({ post_id, tag_id }: { post_id: string; tag_id: string }) {
+  await pool.query("INSERT INTO post_tags (post_id, tag_id) VALUES ($1, $2)", [post_id, tag_id])
 }

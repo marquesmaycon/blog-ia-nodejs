@@ -103,6 +103,35 @@ describe("rotas /posts", () => {
       assert.deepEqual(res.body, { message: "Invalid value for 'include'" })
     })
 
+    it("repassa o filtro por tag ao service", async () => {
+      const res = await request(buildServer()).get("/posts?tag=node-js")
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
+        { includeAll: false, tag: "node-js" }
+      ])
+    })
+
+    it("combina o filtro por tag com include=all", async () => {
+      const res = await request(buildServer()).get("/posts?include=all&tag=ia").set(auth)
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
+        { includeAll: true, tag: "ia" }
+      ])
+    })
+
+    for (const tag of ["Node.js", "node--js", "-ia", "com espaço", "x".repeat(51)]) {
+      it(`responde 400 para tag que não é slug: ${JSON.stringify(tag.slice(0, 12))}`, async () => {
+        const res = await request(buildServer()).get(`/posts?tag=${encodeURIComponent(tag)}`)
+
+        assert.equal(res.status, 400)
+        assert.equal(res.body.message, "Invalid query parameters")
+        assert.equal(res.body.errors[0].field, "tag")
+        assert.equal(services.listPosts.mock.callCount(), 0)
+      })
+    }
+
     it("responde 500 quando o service falha", async () => {
       services.listPosts.mock.mockImplementationOnce(async () => {
         throw new Error("db down")

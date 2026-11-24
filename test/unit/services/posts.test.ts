@@ -64,6 +64,13 @@ describe("services/posts", () => {
       assert.equal(repository.findApprovedPosts.mock.callCount(), 0)
     })
   })
+  it("repassa o filtro por tag ao repositório", async () => {
+    await listPosts({ tag: "node-js" })
+    await listPosts({ includeAll: true, tag: "ia" })
+
+    assert.deepEqual(repository.findApprovedPosts.mock.calls[0].arguments, [{ tag: "node-js" }])
+    assert.deepEqual(repository.findAllPosts.mock.calls[0].arguments, [{ tag: "ia" }])
+  })
 
   describe("getPost / approvePost / rejectPost", () => {
     it("delegam ao repositório com o id", async () => {
