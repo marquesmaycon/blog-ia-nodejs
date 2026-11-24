@@ -3,6 +3,7 @@ import { registerCommentRoutes } from "./routes/comments.ts"
 import { registerDocsRoutes } from "./routes/docs.ts"
 import { registerLikeRoutes } from "./routes/likes.ts"
 import { registerPostRoutes } from "./routes/posts.ts"
+import { registerTagRoutes } from "./routes/tags.ts"
 
 const { API_PORT, API_HOST, API_PROTOCOL } = process.env
 
@@ -12,6 +13,7 @@ registerDocsRoutes(app)
 registerPostRoutes(app)
 registerCommentRoutes(app)
 registerLikeRoutes(app)
+registerTagRoutes(app)
 
 app.listen({ port: Number(API_PORT ?? 8080), host: API_HOST }, () => {
   console.log(`Server running on ${API_PROTOCOL}://${API_HOST}:${API_PORT}`)
