@@ -4,15 +4,16 @@ import { POST_COLUMNS, type Post } from "../../src/repositories/posts.ts"
 
 export { pool }
 
-// CASCADE limpa junto as tabelas que referenciam posts (ex.: comments)
+// CASCADE limpa junto as tabelas que referenciam posts (comments, post_likes, post_tags).
+// tags não referencia posts, então entra explicitamente.
 export async function truncatePosts() {
-  await pool.query("TRUNCATE posts CASCADE")
+  await pool.query("TRUNCATE posts, tags CASCADE")
 }
 
 // Insere direto no banco, para montar cenários sem depender do código testado
-// Contadores são derivados (subqueries), por isso ficam fora dos overrides
+// Contadores e tags são derivados (subqueries), por isso ficam fora dos overrides
 export async function seedPost(
-  overrides: Partial<Omit<Post, "likes_count" | "comments_count">> = {}
+  overrides: Partial<Omit<Post, "likes_count" | "comments_count" | "tags">> = {}
 ): Promise<Post> {
   const post = {
     id: `seed-${crypto.randomUUID()}`,

@@ -9,7 +9,8 @@ import {
   findPostById,
   insertPost,
   rejectPostById,
-  type Post
+  type Post,
+  type PostFilters
 } from "../repositories/posts.ts"
 
 const generatedPostSchema = z.object({
@@ -17,8 +18,15 @@ const generatedPostSchema = z.object({
   content: z.string().min(1).describe("Corpo completo do post em Markdown")
 })
 
-export async function listPosts({ includeAll = false } = {}): Promise<Post[]> {
-  return includeAll ? findAllPosts() : findApprovedPosts()
+export type ListPostsOptions = PostFilters & {
+  includeAll?: boolean
+}
+
+export async function listPosts({ includeAll = false, tag }: ListPostsOptions = {}): Promise<
+  Post[]
+> {
+  const filters = { tag }
+  return includeAll ? findAllPosts(filters) : findApprovedPosts(filters)
 }
 
 export async function getPost(id: string): Promise<Post | null> {

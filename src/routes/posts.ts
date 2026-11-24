@@ -9,6 +9,15 @@ const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
 })
 
+// O filtro usa o slug (ex.: "node-js"), o mesmo que aparece em post.tags[].slug
+const listPostsQuerySchema = z.object({
+  tag: z
+    .string()
+    .max(50)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Must be a tag slug (e.g. 'node-js')")
+    .optional()
+})
+
 export function registerPostRoutes(app: App) {
   app.get("/posts", async (req, res) => {
     const include = req.query.get("include")
@@ -17,12 +26,15 @@ export function registerPostRoutes(app: App) {
       return res.status(400).send({ message: "Invalid value for 'include'" })
     }
 
+    const query = listPostsQuerySchema.safeParse({ tag: req.query.get("tag") ?? undefined })
+    if (!query.success) return sendValidationError(res, query.error, "Invalid query parameters")
+
     const includeAll = include === "all"
 
     if (includeAll && !requireApiKey(req, res)) return
 
     try {
-      const posts = await listPosts({ includeAll })
+      const posts = await listPosts({ includeAll, tag: query.data.tag })
       return res.send({ data: posts })
     } catch (error) {
       console.error("Falha ao listar os posts:", error)

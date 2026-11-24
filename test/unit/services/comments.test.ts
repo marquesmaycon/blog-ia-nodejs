@@ -14,7 +14,8 @@ const approvedPost: Post = {
   approved_at: "2026-01-01T00:00:00.000Z",
   rejected_at: null,
   likes_count: 0,
-  comments_count: 0
+  comments_count: 0,
+  tags: []
 }
 
 const comment: Comment = {

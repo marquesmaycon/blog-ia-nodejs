@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { NewPost, Post } from "../../../src/repositories/posts.ts"
+import type { NewPost, Post, PostFilters } from "../../../src/repositories/posts.ts"
 
 const post: Post = {
   id: "abc",
@@ -13,12 +13,13 @@ const post: Post = {
   approved_at: null,
   rejected_at: null,
   likes_count: 0,
-  comments_count: 0
+  comments_count: 0,
+  tags: []
 }
 
 const repository = {
-  findAllPosts: mock.fn(async (): Promise<Post[]> => [post]),
-  findApprovedPosts: mock.fn(async (): Promise<Post[]> => []),
+  findAllPosts: mock.fn(async (_filters?: PostFilters): Promise<Post[]> => [post]),
+  findApprovedPosts: mock.fn(async (_filters?: PostFilters): Promise<Post[]> => []),
   findPostById: mock.fn(async (_id: string): Promise<Post | null> => post),
   insertPost: mock.fn(async (data: NewPost): Promise<Post> => ({ ...post, ...data })),
   approvePostById: mock.fn(async (_id: string): Promise<Post | null> => post),

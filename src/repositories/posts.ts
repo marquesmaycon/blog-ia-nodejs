@@ -2,6 +2,11 @@ import { nanoid } from "nanoid"
 
 import { pool } from "../db/index.ts"
 
+export type PostTag = {
+  name: string
+  slug: string
+}
+
 export type Post = {
   id: string
   title: string
@@ -12,6 +17,13 @@ export type Post = {
   likes_count: number
   // Só comentários aprovados entram na contagem
   comments_count: number
+  // Ordenadas pelo nome; lista vazia quando o post não tem tags
+  tags: PostTag[]
+}
+
+export type PostFilters = {
+  // Slug da tag; sem ela, não filtra
+  tag?: string
 }
 
 export type NewPost = Pick<Post, "title" | "content">
@@ -27,19 +39,35 @@ export const POST_COLUMNS = `posts.id, posts.title, posts.content, posts.publish
   posts.approved_at, posts.rejected_at,
   (SELECT COUNT(*)::int FROM post_likes WHERE post_likes.post_id = posts.id) AS likes_count,
   (SELECT COUNT(*)::int FROM comments
-    WHERE comments.post_id = posts.id AND comments.status = 'approved') AS comments_count`
+    WHERE comments.post_id = posts.id AND comments.status = 'approved') AS comments_count,
+  COALESCE(
+    (SELECT json_agg(json_build_object('name', tags.name, 'slug', tags.slug) ORDER BY tags.name)
+     FROM post_tags JOIN tags ON tags.id = post_tags.tag_id
+     WHERE post_tags.post_id = posts.id),
+    '[]'::json
+  ) AS tags`
 
-export async function findAllPosts(): Promise<Post[]> {
+// $1 é o slug da tag; NULL desliga o filtro
+const TAG_FILTER = `($1::text IS NULL OR EXISTS (
+  SELECT 1 FROM post_tags JOIN tags ON tags.id = post_tags.tag_id
+  WHERE post_tags.post_id = posts.id AND tags.slug = $1
+))`
+
+export async function findAllPosts({ tag }: PostFilters = {}): Promise<Post[]> {
   const { rows } = await pool.query<Post>(
-    `SELECT ${POST_COLUMNS} FROM posts ORDER BY published_at DESC`
+    `SELECT ${POST_COLUMNS} FROM posts WHERE ${TAG_FILTER} ORDER BY published_at DESC`,
+    [tag ?? null]
   )
 
   return rows
 }
 
-export async function findApprovedPosts(): Promise<Post[]> {
+export async function findApprovedPosts({ tag }: PostFilters = {}): Promise<Post[]> {
   const { rows } = await pool.query<Post>(
-    `SELECT ${POST_COLUMNS} FROM posts WHERE approved_at IS NOT NULL ORDER BY published_at DESC`
+    `SELECT ${POST_COLUMNS} FROM posts
+     WHERE approved_at IS NOT NULL AND ${TAG_FILTER}
+     ORDER BY published_at DESC`,
+    [tag ?? null]
   )
 
   return rows

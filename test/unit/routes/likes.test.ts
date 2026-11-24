@@ -17,6 +17,7 @@ const popular: PopularPost = {
   rejected_at: null,
   likes_count: 3,
   comments_count: 1,
+  tags: [],
   recent_likes: 2
 }
 

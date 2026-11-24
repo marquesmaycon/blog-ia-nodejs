@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 import request from "supertest"
 
 import type { Post } from "../../../src/repositories/posts.ts"
+import type { ListPostsOptions } from "../../../src/services/posts.ts"
 
 const services = {
-  listPosts: mock.fn(async (_options?: { includeAll?: boolean }): Promise<Post[]> => []),
+  listPosts: mock.fn(async (_options?: ListPostsOptions): Promise<Post[]> => []),
   getPost: mock.fn(async (_id: string): Promise<Post | null> => null),
   approvePost: mock.fn(async (_id: string): Promise<Post | null> => null),
   rejectPost: mock.fn(async (_id: string): Promise<Post | null> => null),
@@ -28,7 +29,8 @@ const post: Post = {
   approved_at: null,
   rejected_at: null,
   likes_count: 0,
-  comments_count: 0
+  comments_count: 0,
+  tags: []
 }
 
 const auth = { Authorization: "Bearer secret" }
@@ -63,7 +65,9 @@ describe("rotas /posts", () => {
 
       assert.equal(res.status, 200)
       assert.deepEqual(res.body, { data: [post] })
-      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [{ includeAll: false }])
+      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
+        { includeAll: false, tag: undefined }
+      ])
     })
 
     it("lista todos com include=all e API key válida", async () => {
@@ -72,7 +76,9 @@ describe("rotas /posts", () => {
         .set("Authorization", "Bearer secret")
 
       assert.equal(res.status, 200)
-      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [{ includeAll: true }])
+      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
+        { includeAll: true, tag: undefined }
+      ])
     })
 
     it("responde 403 com include=all sem API key", async () => {
