@@ -22,7 +22,7 @@ describe("rotas /api/docs", () => {
     assert.match(res.text, /\/api\/docs\/json/)
   })
 
-  it("GET /api/docs/json retorna a spec OpenAPI com as rotas de posts e comentários", async () => {
+  it("GET /api/docs/json retorna a spec OpenAPI com as rotas de posts, comentários e curtidas", async () => {
     const res = await request(buildServer()).get("/api/docs/json")
 
     assert.equal(res.status, 200)
@@ -34,9 +34,11 @@ describe("rotas /api/docs", () => {
       "/comments/{id}/approve",
       "/posts",
       "/posts/draft",
+      "/posts/popular",
       "/posts/{id}",
       "/posts/{id}/approve",
       "/posts/{id}/comments",
+      "/posts/{id}/likes",
       "/posts/{id}/reject"
     ])
   })

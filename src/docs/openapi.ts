@@ -70,6 +70,31 @@ const commentListResponse = (description: string) => ({
   }
 })
 
+const visitorIdHeader = {
+  name: "X-Visitor-Id",
+  in: "header",
+  required: true,
+  description:
+    "Identificador do visitante, gerado pelo cliente (ex.: um nanoid guardado no navegador)",
+  schema: { type: "string", pattern: "^[A-Za-z0-9_-]{8,64}$", example: "V1StGXR8_Z5jdHi6B-myT" }
+}
+
+const likeStatusResponse = (description: string) => ({
+  description,
+  content: {
+    "application/json": {
+      schema: {
+        type: "object",
+        required: ["message", "data"],
+        properties: {
+          message: { type: "string" },
+          data: { $ref: "#/components/schemas/LikeStatus" }
+        }
+      }
+    }
+  }
+})
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -78,7 +103,7 @@ export const openApiSpec = {
     description:
       "API de blog em que os posts são escritos por IA. Um agente gera título e conteúdo em Markdown a partir de uma ideia, e o post fica como rascunho até ser aprovado."
   },
-  tags: [{ name: "Posts" }, { name: "Comments" }],
+  tags: [{ name: "Posts" }, { name: "Comments" }, { name: "Likes" }],
   paths: {
     "/posts": {
       get: {
@@ -146,6 +171,48 @@ export const openApiSpec = {
           "400": validationErrorResponse("`idea` ausente ou vazia, ou JSON inválido"),
           "403": forbiddenResponse,
           "502": errorResponse("Falha na geração pelo modelo")
+        }
+      }
+    },
+    "/posts/popular": {
+      get: {
+        tags: ["Likes"],
+        summary: "Lista os posts mais curtidos",
+        description:
+          "Ranking dos posts aprovados pelas curtidas recebidas nos últimos `days` dias. Posts sem curtidas na janela ficam de fora. Empates são desfeitos pelo mais recente.",
+        parameters: [
+          {
+            name: "days",
+            in: "query",
+            required: false,
+            description: "Tamanho da janela, em dias",
+            schema: { type: "integer", minimum: 1, maximum: 365, default: 7 }
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            description: "Quantidade máxima de posts",
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 10 }
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Posts mais curtidos na janela",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["data"],
+                  properties: {
+                    data: { type: "array", items: { $ref: "#/components/schemas/PopularPost" } }
+                  }
+                }
+              }
+            }
+          },
+          "400": validationErrorResponse("`days` ou `limit` fora do intervalo ou não inteiros"),
+          "500": errorResponse("Falha ao listar os posts populares")
         }
       }
     },
@@ -242,6 +309,35 @@ export const openApiSpec = {
         }
       }
     },
+    "/posts/{id}/likes": {
+      post: {
+        tags: ["Likes"],
+        summary: "Curte um post",
+        description:
+          "Idempotente: cada visitante curte um post uma única vez. Só funciona para posts aprovados.",
+        parameters: [idParam, visitorIdHeader],
+        responses: {
+          "201": likeStatusResponse("Curtida registrada"),
+          "200": likeStatusResponse("O visitante já tinha curtido o post"),
+          "400": validationErrorResponse("`X-Visitor-Id` ausente ou inválido"),
+          "404": errorResponse("Post não encontrado ou não aprovado"),
+          "500": errorResponse("Falha ao curtir o post")
+        }
+      },
+      delete: {
+        tags: ["Likes"],
+        summary: "Remove a curtida de um post",
+        description:
+          "Idempotente: responde 200 mesmo que o visitante não tivesse curtido. Só funciona para posts aprovados.",
+        parameters: [idParam, visitorIdHeader],
+        responses: {
+          "200": likeStatusResponse("Curtida removida"),
+          "400": validationErrorResponse("`X-Visitor-Id` ausente ou inválido"),
+          "404": errorResponse("Post não encontrado ou não aprovado"),
+          "500": errorResponse("Falha ao remover a curtida")
+        }
+      }
+    },
     "/comments": {
       get: {
         tags: ["Comments"],
@@ -322,14 +418,56 @@ export const openApiSpec = {
     schemas: {
       Post: {
         type: "object",
-        required: ["id", "title", "content", "published_at", "approved_at", "rejected_at"],
+        required: [
+          "id",
+          "title",
+          "content",
+          "published_at",
+          "approved_at",
+          "rejected_at",
+          "likes_count",
+          "comments_count"
+        ],
         properties: {
           id: { type: "string", example: "V1StGXR8_Z5jdHi6B-myT" },
           title: { type: "string", example: "Título do post" },
           content: { type: "string", description: "Conteúdo em Markdown" },
           published_at: { type: "string", format: "date-time" },
           approved_at: { type: ["string", "null"], format: "date-time" },
-          rejected_at: { type: ["string", "null"], format: "date-time" }
+          rejected_at: { type: ["string", "null"], format: "date-time" },
+          likes_count: { type: "integer", minimum: 0, example: 12 },
+          comments_count: {
+            type: "integer",
+            minimum: 0,
+            description: "Só comentários aprovados",
+            example: 3
+          }
+        }
+      },
+      PopularPost: {
+        allOf: [
+          { $ref: "#/components/schemas/Post" },
+          {
+            type: "object",
+            required: ["recent_likes"],
+            properties: {
+              recent_likes: {
+                type: "integer",
+                minimum: 1,
+                description: "Curtidas recebidas dentro da janela",
+                example: 5
+              }
+            }
+          }
+        ]
+      },
+      LikeStatus: {
+        type: "object",
+        required: ["post_id", "liked", "likes_count"],
+        properties: {
+          post_id: { type: "string", example: "V1StGXR8_Z5jdHi6B-myT" },
+          liked: { type: "boolean", description: "Se o visitante curte o post após a operação" },
+          likes_count: { type: "integer", minimum: 0, example: 12 }
         }
       },
       Comment: {

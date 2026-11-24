@@ -23,9 +23,10 @@ src/
 ├── routes/
 │   ├── docs.ts            # rotas /api/docs (Swagger UI) e /api/docs/json
 │   ├── posts.ts           # rotas /posts
-│   └── comments.ts        # rotas de comentários
-├── services/              # regras de negócio (posts com geração via agente, comentários)
-├── repositories/          # acesso ao Postgres (posts, comments)
+│   ├── comments.ts        # rotas de comentários
+│   └── likes.ts           # rotas de curtidas e posts populares
+├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas)
+├── repositories/          # acesso ao Postgres (posts, comments, likes)
 ├── mastra/                # instância Mastra e agente post-writer
 └── db/
     ├── index.ts           # pool de conexões
@@ -124,9 +125,13 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
   "content": "Conteúdo em **Markdown**...",
   "published_at": "2026-11-19T12:00:00.000Z",
   "approved_at": "2026-11-19T12:00:00.000Z",
-  "rejected_at": null
+  "rejected_at": null,
+  "likes_count": 12,
+  "comments_count": 3
 }
 ```
+
+`likes_count` e `comments_count` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados.
 
 Um post é **rascunho** quando `approved_at` e `rejected_at` estão nulos. Aprovar e reprovar alternam o status: aprovar limpa `rejected_at` e reprovar limpa `approved_at`.
 
@@ -278,6 +283,46 @@ Apaga o comentário definitivamente.
 | `200`  | `{ message: "Comment deleted" }` |
 | `403`  | API key ausente ou inválida      |
 | `404`  | Comentário não encontrado        |
+
+### Curtidas
+
+Não há login: o visitante é identificado pelo header `X-Visitor-Id`, um id gerado pelo cliente (ex.: um nanoid guardado no navegador) com 8 a 64 caracteres entre letras, dígitos, `_` e `-`. Cada visitante curte um post uma única vez, e só posts aprovados aceitam curtidas.
+
+### `POST /posts/:id/likes`
+
+```bash
+curl -X POST http://localhost:8080/posts/<id>/likes   -H "X-Visitor-Id: V1StGXR8_Z5jdHi6B-myT"
+```
+
+| Status | Quando                                                                           |
+| ------ | -------------------------------------------------------------------------------- |
+| `201`  | `{ message: "Post liked", data: { post_id, liked: true, likes_count } }`         |
+| `200`  | O visitante já tinha curtido: `{ message: "Post already liked", data: { ... } }` |
+| `400`  | `X-Visitor-Id` ausente ou inválido                                               |
+| `404`  | Post não encontrado ou não aprovado                                              |
+
+### `DELETE /posts/:id/likes`
+
+Remove a curtida do visitante. É idempotente: responde `200` mesmo que não houvesse curtida.
+
+| Status | Quando                                                                      |
+| ------ | --------------------------------------------------------------------------- |
+| `200`  | `{ message: "Like removed", data: { post_id, liked: false, likes_count } }` |
+| `400`  | `X-Visitor-Id` ausente ou inválido                                          |
+| `404`  | Post não encontrado ou não aprovado                                         |
+
+### `GET /posts/popular`
+
+Ranking dos posts aprovados pelas curtidas recebidas nos últimos `days` dias (1 a 365, padrão `7`), com até `limit` posts (1 a 50, padrão `10`). Cada item é um `Post` com `recent_likes`, as curtidas dentro da janela. Posts sem curtidas na janela ficam de fora.
+
+```bash
+curl "http://localhost:8080/posts/popular?days=30&limit=5"
+```
+
+| Status | Quando                              |
+| ------ | ----------------------------------- |
+| `200`  | `{ data: PopularPost[] }`           |
+| `400`  | `days` ou `limit` fora do intervalo |
 
 ## Testes
 
