@@ -6,6 +6,8 @@ const errorResponse = (description: string) => ({
   content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } }
 })
 
+const forbiddenResponse = errorResponse("API key ausente ou inválida")
+
 const postResponse = (description: string, withMessage = false) => ({
   description,
   content: {
@@ -81,6 +83,8 @@ export const openApiSpec = {
       post: {
         tags: ["Posts"],
         summary: "Gera um rascunho de post a partir de uma ideia",
+        description: "Requer API key.",
+        security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
           content: {
@@ -102,6 +106,7 @@ export const openApiSpec = {
         responses: {
           "201": postResponse("Post gerado e salvo como rascunho", true),
           "400": errorResponse("`idea` ausente ou vazia, ou JSON inválido"),
+          "403": forbiddenResponse,
           "502": errorResponse("Falha na geração pelo modelo")
         }
       }
@@ -123,10 +128,13 @@ export const openApiSpec = {
       patch: {
         tags: ["Posts"],
         summary: "Aprova um post",
-        description: "Define `approved_at` e `published_at` como agora e limpa `rejected_at`.",
+        description:
+          "Define `approved_at` e `published_at` como agora e limpa `rejected_at`. Requer API key.",
         parameters: [idParam],
+        security: [{ bearerAuth: [] }],
         responses: {
           "200": postResponse("Post aprovado", true),
+          "403": forbiddenResponse,
           "404": errorResponse("Post não encontrado"),
           "500": errorResponse("Falha ao aprovar o post")
         }
@@ -137,10 +145,12 @@ export const openApiSpec = {
         tags: ["Posts"],
         summary: "Reprova um post",
         description:
-          "Define `rejected_at` como agora e limpa `approved_at`. O registro não é apagado.",
+          "Define `rejected_at` como agora e limpa `approved_at`. O registro não é apagado. Requer API key.",
         parameters: [idParam],
+        security: [{ bearerAuth: [] }],
         responses: {
           "200": postResponse("Post reprovado", true),
+          "403": forbiddenResponse,
           "404": errorResponse("Post não encontrado"),
           "500": errorResponse("Falha ao reprovar o post")
         }

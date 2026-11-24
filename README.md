@@ -62,16 +62,16 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 
 ### Variáveis de ambiente
 
-| Variável            | Descrição                                                   | Padrão                                            |
-| ------------------- | ----------------------------------------------------------- | ------------------------------------------------- |
-| `API_HOST`          | Host em que o servidor escuta                               | `localhost` (no Docker: `0.0.0.0`)                |
-| `API_PORT`          | Porta do servidor                                           | `8080`                                            |
-| `API_PROTOCOL`      | Usado apenas no log de inicialização                        | `http`                                            |
-| `API_KEY`           | Chave exigida como Bearer token em `GET /posts?include=all` | vazio, ou seja, o acesso protegido fica bloqueado |
-| `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra     | `google/gemini-2.5-flash`                         |
-| `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)              | —                                                 |
-| `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`                   | —                                                 |
-| `DATABASE_URL`      | Connection string do Postgres                               | `postgres://blog:blog@localhost:5432/blog`        |
+| Variável            | Descrição                                               | Padrão                                            |
+| ------------------- | ------------------------------------------------------- | ------------------------------------------------- |
+| `API_HOST`          | Host em que o servidor escuta                           | `localhost` (no Docker: `0.0.0.0`)                |
+| `API_PORT`          | Porta do servidor                                       | `8080`                                            |
+| `API_PROTOCOL`      | Usado apenas no log de inicialização                    | `http`                                            |
+| `API_KEY`           | Bearer token das rotas administrativas (ver Endpoints)  | vazio, ou seja, o acesso protegido fica bloqueado |
+| `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra | `google/gemini-2.5-flash`                         |
+| `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)          | —                                                 |
+| `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`               | —                                                 |
+| `DATABASE_URL`      | Connection string do Postgres                           | `postgres://blog:blog@localhost:5432/blog`        |
 
 ### Scripts
 
@@ -99,6 +99,8 @@ Os hooks do `lefthook` são instalados no `npm install`: o pre-commit roda `lint
 
 Todas as respostas são JSON. Em caso de sucesso, o recurso vem em `data`. Em caso de erro, o corpo é `{ "message": "..." }`.
 
+As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject` e `GET /posts?include=all`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+
 A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
 ### Modelo `Post`
@@ -122,6 +124,7 @@ Gera um post com o agente a partir de uma ideia e o salva como rascunho.
 
 ```bash
 curl -X POST http://localhost:8080/posts/draft \
+  -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "idea": "Como usar AbortController em Node.js" }'
 ```
@@ -130,6 +133,7 @@ curl -X POST http://localhost:8080/posts/draft \
 | ------ | ----------------------------------------- |
 | `201`  | Post gerado e salvo: `{ message, data }`  |
 | `400`  | `idea` ausente ou vazia, ou JSON inválido |
+| `403`  | API key ausente ou inválida               |
 | `502`  | Falha na geração pelo modelo              |
 
 ### `GET /posts`
@@ -165,12 +169,14 @@ Retorna um post pelo id, independentemente do status.
 Aprova o post: define `approved_at` e `published_at` como agora e limpa `rejected_at`.
 
 ```bash
-curl -X PATCH http://localhost:8080/posts/<id>/approve
+curl -X PATCH http://localhost:8080/posts/<id>/approve \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 | Status | Quando                                     |
 | ------ | ------------------------------------------ |
 | `200`  | `{ message: "Post approved", data: Post }` |
+| `403`  | API key ausente ou inválida                |
 | `404`  | Post não encontrado                        |
 
 ### `DELETE /posts/:id/reject`
@@ -178,12 +184,14 @@ curl -X PATCH http://localhost:8080/posts/<id>/approve
 Reprova o post: define `rejected_at` como agora e limpa `approved_at`. O registro **não** é apagado.
 
 ```bash
-curl -X DELETE http://localhost:8080/posts/<id>/reject
+curl -X DELETE http://localhost:8080/posts/<id>/reject \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 | Status | Quando                                     |
 | ------ | ------------------------------------------ |
 | `200`  | `{ message: "Post rejected", data: Post }` |
+| `403`  | API key ausente ou inválida                |
 | `404`  | Post não encontrado                        |
 
 ## Testes
