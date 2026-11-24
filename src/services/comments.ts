@@ -7,15 +7,9 @@ import {
   type Comment,
   type CommentStatus
 } from "../repositories/comments.ts"
-import { findPostById } from "../repositories/posts.ts"
+import { isPublishedPost } from "./post-visibility.ts"
 
 export type CommentInput = Pick<Comment, "author_name" | "content">
-
-// Comentários só existem para posts publicados: rascunhos e reprovados ficam invisíveis
-async function isPublishedPost(postId: string): Promise<boolean> {
-  const post = await findPostById(postId)
-  return post?.approved_at != null
-}
 
 // Retorna null quando o post não existe ou não está aprovado
 export async function listPostComments(postId: string): Promise<Comment[] | null> {
