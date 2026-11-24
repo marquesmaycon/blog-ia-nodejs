@@ -17,3 +17,21 @@ export const pool = new pg.Pool({ connectionString: DATABASE_URL })
 pool.on("error", (error) => {
   console.error("Erro em conexão ociosa do Postgres:", error.message)
 })
+
+// Executa `fn` numa transação: COMMIT se resolver, ROLLBACK se lançar (e relança o erro).
+// Todas as queries da transação precisam usar o `client` recebido, não o `pool`.
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect()
+
+  try {
+    await client.query("BEGIN")
+    const result = await fn(client)
+    await client.query("COMMIT")
+    return result
+  } catch (error) {
+    await client.query("ROLLBACK")
+    throw error
+  } finally {
+    client.release()
+  }
+}
