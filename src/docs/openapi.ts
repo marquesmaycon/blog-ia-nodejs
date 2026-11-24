@@ -95,6 +95,14 @@ const likeStatusResponse = (description: string) => ({
   }
 })
 
+const tagSlugParam = {
+  name: "slug",
+  in: "path",
+  required: true,
+  description: "Slug da tag",
+  schema: { type: "string", example: "node-js" }
+}
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -103,14 +111,14 @@ export const openApiSpec = {
     description:
       "API de blog em que os posts são escritos por IA. Um agente gera título e conteúdo em Markdown a partir de uma ideia, e o post fica como rascunho até ser aprovado."
   },
-  tags: [{ name: "Posts" }, { name: "Comments" }, { name: "Likes" }],
+  tags: [{ name: "Posts" }, { name: "Comments" }, { name: "Likes" }, { name: "Tags" }],
   paths: {
     "/posts": {
       get: {
         tags: ["Posts"],
         summary: "Lista os posts",
         description:
-          "Lista os posts aprovados, do mais recente para o mais antigo. Com `include=all`, lista todos os posts (rascunhos e reprovados também) e exige a API key.",
+          "Lista os posts aprovados, do mais recente para o mais antigo. Com `include=all`, lista todos os posts (rascunhos e reprovados também) e exige a API key. Com `tag`, filtra pelos posts que têm a tag (uma tag inexistente devolve lista vazia).",
         parameters: [
           {
             name: "include",
@@ -118,6 +126,18 @@ export const openApiSpec = {
             required: false,
             description: "Use `all` para incluir rascunhos e reprovados (requer API key)",
             schema: { type: "string", enum: ["all"] }
+          },
+          {
+            name: "tag",
+            in: "query",
+            required: false,
+            description: "Slug da tag para filtrar",
+            schema: {
+              type: "string",
+              maxLength: 50,
+              pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              example: "node-js"
+            }
           }
         ],
         security: [{}, { bearerAuth: [] }],
@@ -136,7 +156,9 @@ export const openApiSpec = {
               }
             }
           },
-          "400": errorResponse("`include` com valor diferente de `all`"),
+          "400": validationErrorResponse(
+            "`include` com valor diferente de `all`, ou `tag` que não é um slug"
+          ),
           "403": errorResponse("`include=all` sem API key válida"),
           "500": errorResponse("Falha ao listar os posts")
         }
@@ -338,6 +360,98 @@ export const openApiSpec = {
         }
       }
     },
+    "/posts/{id}/tags": {
+      put: {
+        tags: ["Tags"],
+        summary: "Substitui as tags de um post",
+        description:
+          "Cria na hora as tags que ainda não existem e substitui o conjunto atual; lista vazia remove todas. Nomes com o mesmo slug viram uma tag só. Funciona em qualquer status do post. Requer API key.",
+        parameters: [idParam],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["tags"],
+                properties: {
+                  tags: {
+                    type: "array",
+                    maxItems: 10,
+                    items: {
+                      type: "string",
+                      minLength: 1,
+                      maxLength: 40,
+                      description: "Precisa ter pelo menos uma letra ou dígito"
+                    },
+                    example: ["Node.js", "IA"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          "200": postResponse("Tags do post atualizadas", true),
+          "400": validationErrorResponse("`tags` ausente, não é lista ou tem tag inválida"),
+          "403": forbiddenResponse,
+          "404": errorResponse("Post não encontrado"),
+          "500": errorResponse("Falha ao atualizar as tags do post")
+        }
+      }
+    },
+    "/tags": {
+      get: {
+        tags: ["Tags"],
+        summary: "Lista as tags em uso",
+        description:
+          "Só tags com pelo menos um post aprovado, da mais usada para a menos usada e, em caso de empate, pelo nome.",
+        responses: {
+          "200": {
+            description: "Tags com a contagem de posts aprovados",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["data"],
+                  properties: {
+                    data: { type: "array", items: { $ref: "#/components/schemas/TagWithCount" } }
+                  }
+                }
+              }
+            }
+          },
+          "500": errorResponse("Falha ao listar as tags")
+        }
+      }
+    },
+    "/tags/{slug}": {
+      delete: {
+        tags: ["Tags"],
+        summary: "Apaga uma tag",
+        description: "Remove a tag de todos os posts. Requer API key.",
+        parameters: [tagSlugParam],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Tag apagada",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["message"],
+                  properties: { message: { type: "string" } }
+                }
+              }
+            }
+          },
+          "403": forbiddenResponse,
+          "404": errorResponse("Tag não encontrada"),
+          "500": errorResponse("Falha ao apagar a tag")
+        }
+      }
+    },
     "/comments": {
       get: {
         tags: ["Comments"],
@@ -426,7 +540,8 @@ export const openApiSpec = {
           "approved_at",
           "rejected_at",
           "likes_count",
-          "comments_count"
+          "comments_count",
+          "tags"
         ],
         properties: {
           id: { type: "string", example: "V1StGXR8_Z5jdHi6B-myT" },
@@ -441,8 +556,38 @@ export const openApiSpec = {
             minimum: 0,
             description: "Só comentários aprovados",
             example: 3
+          },
+          tags: {
+            type: "array",
+            description: "Ordenadas pelo nome",
+            items: { $ref: "#/components/schemas/Tag" }
           }
         }
+      },
+      Tag: {
+        type: "object",
+        required: ["name", "slug"],
+        properties: {
+          name: { type: "string", example: "Node.js" },
+          slug: { type: "string", example: "node-js" }
+        }
+      },
+      TagWithCount: {
+        allOf: [
+          { $ref: "#/components/schemas/Tag" },
+          {
+            type: "object",
+            required: ["posts_count"],
+            properties: {
+              posts_count: {
+                type: "integer",
+                minimum: 1,
+                description: "Só posts aprovados",
+                example: 4
+              }
+            }
+          }
+        ]
       },
       PopularPost: {
         allOf: [

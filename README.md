@@ -24,12 +24,14 @@ src/
 │   ├── docs.ts            # rotas /api/docs (Swagger UI) e /api/docs/json
 │   ├── posts.ts           # rotas /posts
 │   ├── comments.ts        # rotas de comentários
-│   └── likes.ts           # rotas de curtidas e posts populares
-├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas)
-├── repositories/          # acesso ao Postgres (posts, comments, likes)
+│   ├── likes.ts           # rotas de curtidas e posts populares
+│   └── tags.ts            # rotas de tags
+├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas, tags)
+├── repositories/          # acesso ao Postgres (posts, comments, likes, tags)
+├── utils/slugify.ts       # gera slugs ASCII (ex.: "Node.js" -> "node-js")
 ├── mastra/                # instância Mastra e agente post-writer
 └── db/
-    ├── index.ts           # pool de conexões
+    ├── index.ts           # pool de conexões e helper withTransaction
     └── migrations/        # migrations SQL (postgrator)
 ```
 
@@ -112,7 +114,7 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 }
 ```
 
-As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve` e `DELETE /comments/:id`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
@@ -127,11 +129,15 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
   "approved_at": "2026-11-19T12:00:00.000Z",
   "rejected_at": null,
   "likes_count": 12,
-  "comments_count": 3
+  "comments_count": 3,
+  "tags": [
+    { "name": "IA", "slug": "ia" },
+    { "name": "Node.js", "slug": "node-js" }
+  ]
 }
 ```
 
-`likes_count` e `comments_count` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados.
+`likes_count`, `comments_count` e `tags` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados, e `tags` vem ordenado pelo nome.
 
 Um post é **rascunho** quando `approved_at` e `rejected_at` estão nulos. Aprovar e reprovar alternam o status: aprovar limpa `rejected_at` e reprovar limpa `approved_at`.
 
@@ -157,10 +163,12 @@ curl -X POST http://localhost:8080/posts/draft \
 
 Lista os posts aprovados, do mais recente para o mais antigo.
 
-Com `?include=all`, lista todos os posts (rascunhos e reprovados também), mas exige a API key:
+Com `?include=all`, lista todos os posts (rascunhos e reprovados também), mas exige a API key. Com `?tag=<slug>`, filtra pelos posts que têm a tag. Os dois parâmetros podem ser combinados, e uma tag que não existe devolve lista vazia:
 
 ```bash
 curl http://localhost:8080/posts
+
+curl "http://localhost:8080/posts?tag=node-js"
 
 curl "http://localhost:8080/posts?include=all" \
   -H "Authorization: Bearer $API_KEY"
@@ -169,7 +177,7 @@ curl "http://localhost:8080/posts?include=all" \
 | Status | Quando                                                       |
 | ------ | ------------------------------------------------------------ |
 | `200`  | `{ data: Post[] }`                                           |
-| `400`  | `include` com valor diferente de `all`                       |
+| `400`  | `include` diferente de `all`, ou `tag` que não é slug        |
 | `403`  | `include=all` sem API key válida (ou `API_KEY` não definida) |
 
 ### `GET /posts/:id`
@@ -324,6 +332,46 @@ curl "http://localhost:8080/posts/popular?days=30&limit=5"
 | `200`  | `{ data: PopularPost[] }`           |
 | `400`  | `days` ou `limit` fora do intervalo |
 
+### Tags
+
+A identidade de uma tag é o slug gerado do nome (`"Node.js"` vira `node-js`). Nomes que geram o mesmo slug são a mesma tag, e o primeiro nome cadastrado é o que fica. O filtro `GET /posts?tag=` e o `DELETE` usam o slug.
+
+### `PUT /posts/:id/tags`
+
+Substitui as tags do post. As tags que ainda não existem são criadas na hora, e `{ "tags": [] }` remove todas. Funciona em qualquer status, então dá para taggear o rascunho antes de aprovar. Aceita até 10 tags, cada uma com 1 a 40 caracteres e pelo menos uma letra ou dígito. Requer API key.
+
+```bash
+curl -X PUT http://localhost:8080/posts/<id>/tags \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tags": ["Node.js", "IA"]}'
+```
+
+| Status | Quando                                           |
+| ------ | ------------------------------------------------ |
+| `200`  | `{ message: "Post tags updated", data: Post }`   |
+| `400`  | `tags` ausente, não é lista, ou tem tag inválida |
+| `403`  | API key ausente ou inválida                      |
+| `404`  | Post não encontrado                              |
+
+### `GET /tags`
+
+Lista as tags que têm pelo menos um post aprovado. `posts_count` conta só os posts aprovados. A ordem é da tag mais usada para a menos usada e, em caso de empate, pelo nome.
+
+| Status | Quando                                    |
+| ------ | ----------------------------------------- |
+| `200`  | `{ data: [{ name, slug, posts_count }] }` |
+
+### `DELETE /tags/:slug`
+
+Apaga a tag e a remove de todos os posts. Requer API key.
+
+| Status | Quando                       |
+| ------ | ---------------------------- |
+| `200`  | `{ message: "Tag deleted" }` |
+| `403`  | API key ausente ou inválida  |
+| `404`  | Tag não encontrada           |
+
 ## Testes
 
 Os testes usam o runner nativo do Node (`node --test`) e o `supertest` para as requisições HTTP. Ficam em `test/`, separados por tipo:
@@ -334,7 +382,7 @@ Os testes usam o runner nativo do Node (`node --test`) e o `supertest` para as r
 | Integração | `test/integration/` | Repositório executando SQL de verdade                                                               | Postgres              |
 | E2E        | `test/e2e/`         | Fluxo completo pela API (rascunho → aprovação → reprovação), com o LLM mockado em `mastra.getAgent` | Postgres              |
 
-Integração e E2E leem o `.env.test` (versionado, sem segredos) e usam o banco `blog_test` no mesmo Postgres do `docker compose`. Antes dos testes, o setup global ([test/setup/database.ts](test/setup/database.ts)) cria o banco, se ainda não existir, e aplica as migrations. Por segurança, ele recusa qualquer banco cujo nome não termine em `_test`, já que os testes truncam a tabela `posts` (e, em cascata, as que dependem dela). Essas suítes rodam com `--test-concurrency=1` porque compartilham o banco.
+Integração e E2E leem o `.env.test` (versionado, sem segredos) e usam o banco `blog_test` no mesmo Postgres do `docker compose`. Antes dos testes, o setup global ([test/setup/database.ts](test/setup/database.ts)) cria o banco, se ainda não existir, e aplica as migrations. Por segurança, ele recusa qualquer banco cujo nome não termine em `_test`, já que os testes truncam as tabelas `posts` e `tags` (e, em cascata, as que dependem delas). Essas suítes rodam com `--test-concurrency=1` porque compartilham o banco.
 
 Os unitários usam `mock.module`, que no Node 26 ainda exige `--experimental-test-module-mocks` (já incluso no script). O aviso `ExperimentalWarning` na saída é esperado.
 
