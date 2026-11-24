@@ -11,7 +11,9 @@ const post: Post = {
   content: "Conteúdo",
   published_at: "2026-01-01T00:00:00.000Z",
   approved_at: null,
-  rejected_at: null
+  rejected_at: null,
+  likes_count: 0,
+  comments_count: 0
 }
 
 const repository = {

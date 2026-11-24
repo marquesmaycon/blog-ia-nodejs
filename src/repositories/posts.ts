@@ -9,11 +9,25 @@ export type Post = {
   published_at: string
   approved_at: string | null
   rejected_at: string | null
+  likes_count: number
+  // Só comentários aprovados entram na contagem
+  comments_count: number
 }
 
 export type NewPost = Pick<Post, "title" | "content">
 
-const POST_COLUMNS = "id, title, content, published_at, approved_at, rejected_at"
+export type PopularPost = Post & {
+  // Curtidas recebidas dentro da janela consultada
+  recent_likes: number
+}
+
+// Colunas qualificadas para não colidir em JOINs. As subqueries correlacionadas também
+// funcionam no RETURNING; o ::int evita que o pg devolva o COUNT (bigint) como string.
+export const POST_COLUMNS = `posts.id, posts.title, posts.content, posts.published_at,
+  posts.approved_at, posts.rejected_at,
+  (SELECT COUNT(*)::int FROM post_likes WHERE post_likes.post_id = posts.id) AS likes_count,
+  (SELECT COUNT(*)::int FROM comments
+    WHERE comments.post_id = posts.id AND comments.status = 'approved') AS comments_count`
 
 export async function findAllPosts(): Promise<Post[]> {
   const { rows } = await pool.query<Post>(
@@ -70,4 +84,28 @@ export async function rejectPostById(id: string): Promise<Post | null> {
   )
 
   return rows[0] ?? null
+}
+
+// Ranking de posts aprovados pelas curtidas recebidas nos últimos `days` dias.
+// Posts sem curtidas na janela ficam de fora.
+export async function findPopularPosts({
+  days,
+  limit
+}: {
+  days: number
+  limit: number
+}): Promise<PopularPost[]> {
+  const { rows } = await pool.query<PopularPost>(
+    `SELECT ${POST_COLUMNS}, COUNT(*)::int AS recent_likes
+     FROM posts
+     JOIN post_likes ON post_likes.post_id = posts.id
+     WHERE posts.approved_at IS NOT NULL
+       AND post_likes.created_at >= now() - make_interval(days => $1)
+     GROUP BY posts.id
+     ORDER BY recent_likes DESC, posts.published_at DESC
+     LIMIT $2`,
+    [days, limit]
+  )
+
+  return rows
 }
