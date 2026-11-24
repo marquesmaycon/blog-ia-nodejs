@@ -24,6 +24,23 @@ export type Post = {
 export type PostFilters = {
   // Slug da tag; sem ela, não filtra
   tag?: string
+  // Texto livre da busca full-text; sem ele, não filtra e ordena só por data
+  q?: string
+}
+
+export type FindPostsFilters = PostFilters & {
+  approvedOnly: boolean
+}
+
+export type Pagination = {
+  limit: number
+  offset: number
+}
+
+export type PostsPage = {
+  posts: Post[]
+  // Total de posts que batem com os filtros, ignorando a paginação
+  total: number
 }
 
 export type NewPost = Pick<Post, "title" | "content">
@@ -53,24 +70,36 @@ const TAG_FILTER = `($1::text IS NULL OR EXISTS (
   WHERE post_tags.post_id = posts.id AND tags.slug = $1
 ))`
 
-export async function findAllPosts({ tag }: PostFilters = {}): Promise<Post[]> {
-  const { rows } = await pool.query<Post>(
-    `SELECT ${POST_COLUMNS} FROM posts WHERE ${TAG_FILTER} ORDER BY published_at DESC`,
-    [tag ?? null]
-  )
+// $2 é o texto da busca; NULL desliga o filtro. O websearch_to_tsquery aceita a sintaxe
+// de buscador (aspas, -termo, or) e nunca falha com entrada malformada.
+const SEARCH_QUERY = `websearch_to_tsquery('portuguese', $2)`
+const SEARCH_FILTER = `($2::text IS NULL OR posts.search @@ ${SEARCH_QUERY})`
 
-  return rows
-}
+// Com busca, os mais relevantes primeiro; o id desempata para a paginação ser estável
+const ORDER_BY = `CASE WHEN $2::text IS NULL THEN 0 ELSE ts_rank(posts.search, ${SEARCH_QUERY}) END DESC,
+  posts.published_at DESC, posts.id DESC`
 
-export async function findApprovedPosts({ tag }: PostFilters = {}): Promise<Post[]> {
-  const { rows } = await pool.query<Post>(
-    `SELECT ${POST_COLUMNS} FROM posts
-     WHERE approved_at IS NOT NULL AND ${TAG_FILTER}
-     ORDER BY published_at DESC`,
-    [tag ?? null]
-  )
+export async function findPosts(
+  { approvedOnly, tag, q }: FindPostsFilters,
+  { limit, offset }: Pagination
+): Promise<PostsPage> {
+  // Fragmento constante (sem input do usuário), seguro para interpolar
+  const where = `${approvedOnly ? "posts.approved_at IS NOT NULL AND " : ""}${TAG_FILTER} AND ${SEARCH_FILTER}`
+  const filterParams = [tag ?? null, q ?? null]
 
-  return rows
+  // Duas queries em vez de COUNT(*) OVER(): o total continua certo numa página além do fim
+  const [page, count] = await Promise.all([
+    pool.query<Post>(
+      `SELECT ${POST_COLUMNS} FROM posts WHERE ${where} ORDER BY ${ORDER_BY} LIMIT $3 OFFSET $4`,
+      [...filterParams, limit, offset]
+    ),
+    pool.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total FROM posts WHERE ${where}`,
+      filterParams
+    )
+  ])
+
+  return { posts: page.rows, total: count.rows[0].total }
 }
 
 export async function findPostById(id: string): Promise<Post | null> {

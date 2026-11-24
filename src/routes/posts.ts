@@ -3,7 +3,15 @@ import { z } from "zod"
 import type { App } from "../http/app.ts"
 import { requireApiKey } from "../http/auth.ts"
 import { sendValidationError } from "../http/validation.ts"
-import { approvePost, createPostDraft, getPost, listPosts, rejectPost } from "../services/posts.ts"
+import {
+  approvePost,
+  createPostDraft,
+  DEFAULT_PAGE_LIMIT,
+  getPost,
+  listPosts,
+  MAX_PAGE_LIMIT,
+  rejectPost
+} from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
@@ -15,7 +23,16 @@ const listPostsQuerySchema = z.object({
     .string()
     .max(50)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Must be a tag slug (e.g. 'node-js')")
+    .optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
+  // "q=" ou só espaços contam como busca ausente
+  q: z
+    .string()
+    .trim()
+    .max(200)
     .optional()
+    .transform((value) => value || undefined)
 })
 
 export function registerPostRoutes(app: App) {
@@ -26,7 +43,12 @@ export function registerPostRoutes(app: App) {
       return res.status(400).send({ message: "Invalid value for 'include'" })
     }
 
-    const query = listPostsQuerySchema.safeParse({ tag: req.query.get("tag") ?? undefined })
+    const query = listPostsQuerySchema.safeParse({
+      tag: req.query.get("tag") ?? undefined,
+      page: req.query.get("page") ?? undefined,
+      limit: req.query.get("limit") ?? undefined,
+      q: req.query.get("q") ?? undefined
+    })
     if (!query.success) return sendValidationError(res, query.error, "Invalid query parameters")
 
     const includeAll = include === "all"
@@ -34,8 +56,7 @@ export function registerPostRoutes(app: App) {
     if (includeAll && !requireApiKey(req, res)) return
 
     try {
-      const posts = await listPosts({ includeAll, tag: query.data.tag })
-      return res.send({ data: posts })
+      return res.send(await listPosts({ includeAll, ...query.data }))
     } catch (error) {
       console.error("Falha ao listar os posts:", error)
       return res.status(500).send({ message: "Failed to list posts" })
