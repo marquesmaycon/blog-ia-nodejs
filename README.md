@@ -22,9 +22,10 @@ src/
 ├── docs/openapi.ts        # especificação OpenAPI
 ├── routes/
 │   ├── docs.ts            # rotas /api/docs (Swagger UI) e /api/docs/json
-│   └── posts.ts           # rotas /posts
-├── services/posts.ts      # regras de negócio e geração via agente
-├── repositories/posts.ts  # acesso ao Postgres
+│   ├── posts.ts           # rotas /posts
+│   └── comments.ts        # rotas de comentários
+├── services/              # regras de negócio (posts com geração via agente, comentários)
+├── repositories/          # acesso ao Postgres (posts, comments)
 ├── mastra/                # instância Mastra e agente post-writer
 └── db/
     ├── index.ts           # pool de conexões
@@ -99,7 +100,18 @@ Os hooks do `lefthook` são instalados no `npm install`: o pre-commit roda `lint
 
 Todas as respostas são JSON. Em caso de sucesso, o recurso vem em `data`. Em caso de erro, o corpo é `{ "message": "..." }`.
 
-As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject` e `GET /posts?include=all`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+Erros de validação (`400`) também trazem `errors`, com um item por problema, gerado a partir do zod:
+
+```json
+{
+  "message": "Invalid request body",
+  "errors": [
+    { "field": "content", "message": "Too big: expected string to have <=2000 characters" }
+  ]
+}
+```
+
+As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve` e `DELETE /comments/:id`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
@@ -194,6 +206,79 @@ curl -X DELETE http://localhost:8080/posts/<id>/reject \
 | `403`  | API key ausente ou inválida                |
 | `404`  | Post não encontrado                        |
 
+### Modelo `Comment`
+
+```json
+{
+  "id": "Uakgb_J5m9g-0JDMbcJqL",
+  "post_id": "V1StGXR8_Z5jdHi6B-myT",
+  "author_name": "Ana",
+  "content": "Ótimo post, obrigado!",
+  "status": "pending",
+  "moderation_reason": null,
+  "created_at": "2026-11-19T12:00:00.000Z"
+}
+```
+
+`status` é `pending`, `approved` ou `rejected`. Todo comentário nasce `pending` e só aparece publicamente depois de aprovado. Comentários só existem em posts aprovados: para rascunhos, reprovados ou ids inexistentes, as rotas públicas respondem `404`. Apagar um post apaga os seus comentários.
+
+### `POST /posts/:id/comments`
+
+Comenta um post aprovado. `author_name` aceita de 1 a 80 caracteres e `content` de 1 a 2000.
+
+```bash
+curl -X POST http://localhost:8080/posts/<id>/comments   -H "Content-Type: application/json"   -d '{ "author_name": "Ana", "content": "Ótimo post!" }'
+```
+
+| Status | Quando                                                      |
+| ------ | ----------------------------------------------------------- |
+| `201`  | `{ message: "Comment awaiting moderation", data: Comment }` |
+| `400`  | Campos ausentes, vazios ou longos demais, ou JSON inválido  |
+| `404`  | Post não encontrado ou não aprovado                         |
+
+### `GET /posts/:id/comments`
+
+Lista os comentários aprovados do post, do mais antigo para o mais recente.
+
+| Status | Quando                              |
+| ------ | ----------------------------------- |
+| `200`  | `{ data: Comment[] }`               |
+| `404`  | Post não encontrado ou não aprovado |
+
+### `GET /comments`
+
+Fila de moderação: lista os comentários de todos os posts com o `status` informado (padrão `pending`), do mais antigo para o mais recente.
+
+```bash
+curl "http://localhost:8080/comments?status=pending"   -H "Authorization: Bearer $API_KEY"
+```
+
+| Status | Quando                      |
+| ------ | --------------------------- |
+| `200`  | `{ data: Comment[] }`       |
+| `400`  | `status` inválido           |
+| `403`  | API key ausente ou inválida |
+
+### `PATCH /comments/:id/approve`
+
+Aprova o comentário e limpa `moderation_reason`.
+
+| Status | Quando                                           |
+| ------ | ------------------------------------------------ |
+| `200`  | `{ message: "Comment approved", data: Comment }` |
+| `403`  | API key ausente ou inválida                      |
+| `404`  | Comentário não encontrado                        |
+
+### `DELETE /comments/:id`
+
+Apaga o comentário definitivamente.
+
+| Status | Quando                           |
+| ------ | -------------------------------- |
+| `200`  | `{ message: "Comment deleted" }` |
+| `403`  | API key ausente ou inválida      |
+| `404`  | Comentário não encontrado        |
+
 ## Testes
 
 Os testes usam o runner nativo do Node (`node --test`) e o `supertest` para as requisições HTTP. Ficam em `test/`, separados por tipo:
@@ -204,7 +289,7 @@ Os testes usam o runner nativo do Node (`node --test`) e o `supertest` para as r
 | Integração | `test/integration/` | Repositório executando SQL de verdade                                                               | Postgres              |
 | E2E        | `test/e2e/`         | Fluxo completo pela API (rascunho → aprovação → reprovação), com o LLM mockado em `mastra.getAgent` | Postgres              |
 
-Integração e E2E leem o `.env.test` (versionado, sem segredos) e usam o banco `blog_test` no mesmo Postgres do `docker compose`. Antes dos testes, o setup global ([test/setup/database.ts](test/setup/database.ts)) cria o banco, se ainda não existir, e aplica as migrations. Por segurança, ele recusa qualquer banco cujo nome não termine em `_test`, já que os testes truncam a tabela `posts`. Essas suítes rodam com `--test-concurrency=1` porque compartilham o banco.
+Integração e E2E leem o `.env.test` (versionado, sem segredos) e usam o banco `blog_test` no mesmo Postgres do `docker compose`. Antes dos testes, o setup global ([test/setup/database.ts](test/setup/database.ts)) cria o banco, se ainda não existir, e aplica as migrations. Por segurança, ele recusa qualquer banco cujo nome não termine em `_test`, já que os testes truncam a tabela `posts` (e, em cascata, as que dependem dela). Essas suítes rodam com `--test-concurrency=1` porque compartilham o banco.
 
 Os unitários usam `mock.module`, que no Node 26 ainda exige `--experimental-test-module-mocks` (já incluso no script). O aviso `ExperimentalWarning` na saída é esperado.
 

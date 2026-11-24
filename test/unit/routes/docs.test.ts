@@ -22,17 +22,21 @@ describe("rotas /api/docs", () => {
     assert.match(res.text, /\/api\/docs\/json/)
   })
 
-  it("GET /api/docs/json retorna a spec OpenAPI com as rotas de posts", async () => {
+  it("GET /api/docs/json retorna a spec OpenAPI com as rotas de posts e comentários", async () => {
     const res = await request(buildServer()).get("/api/docs/json")
 
     assert.equal(res.status, 200)
     assert.match(res.headers["content-type"], /^application\/json/)
     assert.equal(res.body.openapi, "3.1.0")
     assert.deepEqual(Object.keys(res.body.paths).toSorted(), [
+      "/comments",
+      "/comments/{id}",
+      "/comments/{id}/approve",
       "/posts",
       "/posts/draft",
       "/posts/{id}",
       "/posts/{id}/approve",
+      "/posts/{id}/comments",
       "/posts/{id}/reject"
     ])
   })
