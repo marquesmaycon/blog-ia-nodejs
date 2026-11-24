@@ -3,7 +3,13 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { NewPost, Post, PostFilters } from "../../../src/repositories/posts.ts"
+import type {
+  FindPostsFilters,
+  NewPost,
+  Pagination,
+  Post,
+  PostsPage
+} from "../../../src/repositories/posts.ts"
 
 const post: Post = {
   id: "abc",
@@ -18,8 +24,12 @@ const post: Post = {
 }
 
 const repository = {
-  findAllPosts: mock.fn(async (_filters?: PostFilters): Promise<Post[]> => [post]),
-  findApprovedPosts: mock.fn(async (_filters?: PostFilters): Promise<Post[]> => []),
+  findPosts: mock.fn(
+    async (_filters: FindPostsFilters, _pagination: Pagination): Promise<PostsPage> => ({
+      posts: [post],
+      total: 23
+    })
+  ),
   findPostById: mock.fn(async (_id: string): Promise<Post | null> => post),
   insertPost: mock.fn(async (data: NewPost): Promise<Post> => ({ ...post, ...data })),
   approvePostById: mock.fn(async (_id: string): Promise<Post | null> => post),
@@ -48,28 +58,38 @@ describe("services/posts", () => {
   })
 
   describe("listPosts", () => {
-    it("busca apenas aprovados por padrão", async () => {
+    it("busca apenas aprovados, na primeira página com o limite padrão", async () => {
       const result = await listPosts()
 
-      assert.deepEqual(result, [])
-      assert.equal(repository.findApprovedPosts.mock.callCount(), 1)
-      assert.equal(repository.findAllPosts.mock.callCount(), 0)
+      assert.deepEqual(result, { data: [post], meta: { page: 1, limit: 10, total: 23 } })
+      assert.deepEqual(repository.findPosts.mock.calls[0].arguments, [
+        { approvedOnly: true, tag: undefined, q: undefined },
+        { limit: 10, offset: 0 }
+      ])
     })
 
     it("busca todos com includeAll", async () => {
-      const result = await listPosts({ includeAll: true })
+      await listPosts({ includeAll: true })
 
-      assert.deepEqual(result, [post])
-      assert.equal(repository.findAllPosts.mock.callCount(), 1)
-      assert.equal(repository.findApprovedPosts.mock.callCount(), 0)
+      assert.equal(repository.findPosts.mock.calls[0].arguments[0].approvedOnly, false)
     })
-  })
-  it("repassa o filtro por tag ao repositório", async () => {
-    await listPosts({ tag: "node-js" })
-    await listPosts({ includeAll: true, tag: "ia" })
 
-    assert.deepEqual(repository.findApprovedPosts.mock.calls[0].arguments, [{ tag: "node-js" }])
-    assert.deepEqual(repository.findAllPosts.mock.calls[0].arguments, [{ tag: "ia" }])
+    it("repassa tag e q ao repositório", async () => {
+      await listPosts({ tag: "node-js", q: "streams" })
+
+      assert.deepEqual(repository.findPosts.mock.calls[0].arguments[0], {
+        approvedOnly: true,
+        tag: "node-js",
+        q: "streams"
+      })
+    })
+
+    it("converte page e limit em offset e devolve no meta", async () => {
+      const result = await listPosts({ page: 3, limit: 5 })
+
+      assert.deepEqual(repository.findPosts.mock.calls[0].arguments[1], { limit: 5, offset: 10 })
+      assert.deepEqual(result.meta, { page: 3, limit: 5, total: 23 })
+    })
   })
 
   describe("getPost / approvePost / rejectPost", () => {

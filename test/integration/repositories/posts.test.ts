@@ -4,13 +4,13 @@ import { after, beforeEach, describe, it } from "node:test"
 
 import {
   approvePostById,
-  findAllPosts,
-  findApprovedPosts,
   findPopularPosts,
   findPostById,
+  findPosts,
   insertPost,
   rejectPostById,
-  type Post
+  type Post,
+  type PostFilters
 } from "../../../src/repositories/posts.ts"
 import {
   pool,
@@ -31,6 +31,28 @@ const pickCounters = (post: Post | null) => ({
 })
 
 const ids = (posts: Post[]) => posts.map((post) => post.id).toSorted()
+
+const FIRST_PAGE = { limit: 50, offset: 0 }
+
+// Atalhos para os cenários que não testam a paginação em si
+const findAllPosts = async (filters: PostFilters = {}) =>
+  (await findPosts({ ...filters, approvedOnly: false }, FIRST_PAGE)).posts
+const findApprovedPosts = async (filters: PostFilters = {}) =>
+  (await findPosts({ ...filters, approvedOnly: true }, FIRST_PAGE)).posts
+
+const searchIds = async (q: string) =>
+  (await findPosts({ approvedOnly: true, q }, FIRST_PAGE)).posts.map((post) => post.id)
+
+// Posts aprovados com published_at crescente (dia 1, dia 2, ...)
+const seedApprovedSeries = (count: number) =>
+  Promise.all(
+    Array.from({ length: count }, (_, i) =>
+      seedPost({
+        ...APPROVED,
+        published_at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`
+      })
+    )
+  )
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString()
 
@@ -67,8 +89,8 @@ describe("repositories/posts", () => {
     })
   })
 
-  describe("findAllPosts / findApprovedPosts", () => {
-    it("findAllPosts retorna todos, do mais recente para o mais antigo", async () => {
+  describe("findPosts: status e ordenação", () => {
+    it("sem approvedOnly retorna todos, do mais recente para o mais antigo", async () => {
       const older = await seedPost({ published_at: "2026-01-01T00:00:00.000Z" })
       const newer = await seedPost({
         published_at: "2026-02-01T00:00:00.000Z",
@@ -83,7 +105,7 @@ describe("repositories/posts", () => {
       )
     })
 
-    it("findApprovedPosts retorna apenas aprovados, ordenados", async () => {
+    it("com approvedOnly retorna apenas aprovados, ordenados", async () => {
       await seedPost({ title: "rascunho" })
       await seedPost({ title: "reprovado", rejected_at: "2026-01-01T00:00:00.000Z" })
       const older = await seedPost({
@@ -106,6 +128,139 @@ describe("repositories/posts", () => {
     it("retornam lista vazia sem posts", async () => {
       assert.deepEqual(await findAllPosts(), [])
       assert.deepEqual(await findApprovedPosts(), [])
+    })
+  })
+
+  describe("findPosts: paginação", () => {
+    it("fatia por limit/offset sem sobreposição e traz o total dos filtros", async () => {
+      const seeded = await seedApprovedSeries(5)
+      await seedPost() // rascunho: fora do total com approvedOnly
+      const newestFirst = seeded.map((post) => post.id).toReversed()
+
+      const first = await findPosts({ approvedOnly: true }, { limit: 2, offset: 0 })
+      const second = await findPosts({ approvedOnly: true }, { limit: 2, offset: 2 })
+      const last = await findPosts({ approvedOnly: true }, { limit: 2, offset: 4 })
+
+      assert.deepEqual(
+        [first, second, last].map((page) => page.posts.map((post) => post.id)),
+        [newestFirst.slice(0, 2), newestFirst.slice(2, 4), newestFirst.slice(4)]
+      )
+      for (const page of [first, second, last]) assert.equal(page.total, 5)
+      assert.equal((await findPosts({ approvedOnly: false }, FIRST_PAGE)).total, 6)
+    })
+
+    it("página além do fim devolve lista vazia com o total real", async () => {
+      await seedApprovedSeries(3)
+
+      assert.deepEqual(await findPosts({ approvedOnly: true }, { limit: 10, offset: 10 }), {
+        posts: [],
+        total: 3
+      })
+    })
+
+    it("desempata pelo id quando published_at é igual, mantendo a ordem estável", async () => {
+      const sameDate = { ...APPROVED, published_at: "2026-01-01T00:00:00.000Z" }
+      const seeded = await Promise.all([1, 2, 3].map(() => seedPost(sameDate)))
+      const expected = seeded
+        .map((post) => post.id)
+        .toSorted()
+        .toReversed()
+
+      const pages = await Promise.all(
+        [0, 1, 2].map((offset) => findPosts({ approvedOnly: true }, { limit: 1, offset }))
+      )
+
+      assert.deepEqual(
+        pages.map((page) => page.posts[0].id),
+        expected
+      )
+    })
+
+    it("devolve total 0 sem posts", async () => {
+      assert.deepEqual(await findPosts({ approvedOnly: false }, FIRST_PAGE), {
+        posts: [],
+        total: 0
+      })
+    })
+  })
+
+  describe("findPosts: busca full-text", () => {
+    it("encontra pelo título e pelo conteúdo, com stemming em português", async () => {
+      const inTitle = await seedPost({ ...APPROVED, title: "Testes em Node.js", content: "x" })
+      const inContent = await seedPost({
+        ...APPROVED,
+        title: "Outro assunto",
+        content: "Como escrever um teste de integração"
+      })
+      const cake = await seedPost({ ...APPROVED, title: "Receita de bolo", content: "Farinha" })
+
+      assert.deepEqual((await searchIds("teste")).toSorted(), [inTitle.id, inContent.id].toSorted())
+      assert.deepEqual(
+        (await searchIds("testes")).toSorted(),
+        [inTitle.id, inContent.id].toSorted()
+      )
+      assert.deepEqual(await searchIds("bolo"), [cake.id])
+      assert.deepEqual(await searchIds("kubernetes"), [])
+    })
+
+    it("ordena por relevância: match no título vem antes do match no conteúdo", async () => {
+      // O post só com match no conteúdo é mais recente, então sem ranking viria primeiro
+      const inTitle = await seedPost({
+        ...APPROVED,
+        published_at: "2026-01-01T00:00:00.000Z",
+        title: "Streams no Node",
+        content: "Um texto qualquer"
+      })
+      const inContent = await seedPost({
+        ...APPROVED,
+        published_at: "2026-02-01T00:00:00.000Z",
+        title: "Outro assunto",
+        content: "Fala de streams de passagem"
+      })
+
+      assert.deepEqual(await searchIds("streams"), [inTitle.id, inContent.id])
+    })
+
+    it("aceita a sintaxe de buscador sem quebrar com entrada estranha", async () => {
+      const both = await seedPost({ ...APPROVED, title: "Node e Deno", content: "runtimes" })
+      const onlyNode = await seedPost({ ...APPROVED, title: "Só Node", content: "runtime" })
+
+      assert.deepEqual(await searchIds("node -deno"), [onlyNode.id])
+      assert.deepEqual(await searchIds('"node e deno"'), [both.id])
+      for (const q of ["node -js or", "&&| !(:*", "'; DROP TABLE posts; --", "-"]) {
+        await assert.doesNotReject(searchIds(q), `q=${q}`)
+      }
+      assert.equal((await findAllPosts()).length, 2)
+    })
+
+    it("combina q com tag e approvedOnly, e o total respeita a busca", async () => {
+      const node = await seedTag({ name: "Node.js" })
+      const approvedTagged = await seedPost({ ...APPROVED, title: "Streams" })
+      const draftTagged = await seedPost({ title: "Streams" })
+      await seedPost({ ...APPROVED, title: "Streams" }) // sem a tag
+      await seedPost({ ...APPROVED, title: "Outra coisa" })
+      await seedPostTag({ post_id: approvedTagged.id, tag_id: node.id })
+      await seedPostTag({ post_id: draftTagged.id, tag_id: node.id })
+
+      const approved = await findPosts(
+        { approvedOnly: true, tag: "node-js", q: "streams" },
+        FIRST_PAGE
+      )
+      const all = await findPosts({ approvedOnly: false, tag: "node-js", q: "streams" }, FIRST_PAGE)
+
+      assert.deepEqual(ids(approved.posts), [approvedTagged.id])
+      assert.equal(approved.total, 1)
+      assert.deepEqual(ids(all.posts), [approvedTagged.id, draftTagged.id].toSorted())
+      assert.equal(all.total, 2)
+      assert.equal((await findPosts({ approvedOnly: true, q: "streams" }, FIRST_PAGE)).total, 2)
+    })
+
+    it("não expõe a coluna search no post", async () => {
+      await seedPost(APPROVED)
+
+      const [post] = await findApprovedPosts()
+
+      assert.equal("search" in post, false)
     })
   })
 

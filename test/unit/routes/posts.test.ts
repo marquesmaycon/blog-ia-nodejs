@@ -6,17 +6,22 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 import request from "supertest"
 
 import type { Post } from "../../../src/repositories/posts.ts"
-import type { ListPostsOptions } from "../../../src/services/posts.ts"
+import type { ListPostsOptions, PaginatedPosts } from "../../../src/services/posts.ts"
+
+const emptyPage: PaginatedPosts = { data: [], meta: { page: 1, limit: 10, total: 0 } }
 
 const services = {
-  listPosts: mock.fn(async (_options?: ListPostsOptions): Promise<Post[]> => []),
+  listPosts: mock.fn(async (_options?: ListPostsOptions): Promise<PaginatedPosts> => emptyPage),
   getPost: mock.fn(async (_id: string): Promise<Post | null> => null),
   approvePost: mock.fn(async (_id: string): Promise<Post | null> => null),
   rejectPost: mock.fn(async (_id: string): Promise<Post | null> => null),
   createPostDraft: mock.fn(async (_idea: string): Promise<Post> => post)
 }
 
-mock.module(import.meta.resolve("../../../src/services/posts.ts"), { exports: services })
+// As constantes de paginação também saem do módulo mockado, então entram nos exports
+mock.module(import.meta.resolve("../../../src/services/posts.ts"), {
+  exports: { ...services, DEFAULT_PAGE_LIMIT: 10, MAX_PAGE_LIMIT: 50 }
+})
 
 const { createApp } = await import("../../../src/http/app.ts")
 const { registerPostRoutes } = await import("../../../src/routes/posts.ts")
@@ -59,14 +64,15 @@ describe("rotas /posts", () => {
 
   describe("GET /posts", () => {
     it("lista apenas aprovados por padrão", async () => {
-      services.listPosts.mock.mockImplementationOnce(async () => [post])
+      const page = { data: [post], meta: { page: 1, limit: 10, total: 1 } }
+      services.listPosts.mock.mockImplementationOnce(async () => page)
 
       const res = await request(buildServer()).get("/posts")
 
       assert.equal(res.status, 200)
-      assert.deepEqual(res.body, { data: [post] })
+      assert.deepEqual(res.body, page)
       assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
-        { includeAll: false, tag: undefined }
+        { includeAll: false, tag: undefined, page: 1, limit: 10, q: undefined }
       ])
     })
 
@@ -77,7 +83,7 @@ describe("rotas /posts", () => {
 
       assert.equal(res.status, 200)
       assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
-        { includeAll: true, tag: undefined }
+        { includeAll: true, tag: undefined, page: 1, limit: 10, q: undefined }
       ])
     })
 
@@ -108,7 +114,7 @@ describe("rotas /posts", () => {
 
       assert.equal(res.status, 200)
       assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
-        { includeAll: false, tag: "node-js" }
+        { includeAll: false, tag: "node-js", page: 1, limit: 10, q: undefined }
       ])
     })
 
@@ -117,7 +123,7 @@ describe("rotas /posts", () => {
 
       assert.equal(res.status, 200)
       assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
-        { includeAll: true, tag: "ia" }
+        { includeAll: true, tag: "ia", page: 1, limit: 10, q: undefined }
       ])
     })
 
@@ -128,6 +134,45 @@ describe("rotas /posts", () => {
         assert.equal(res.status, 400)
         assert.equal(res.body.message, "Invalid query parameters")
         assert.equal(res.body.errors[0].field, "tag")
+        assert.equal(services.listPosts.mock.callCount(), 0)
+      })
+    }
+
+    it("repassa page, limit e q ao service", async () => {
+      const res = await request(buildServer()).get("/posts?page=3&limit=5&q=node%20streams&tag=ia")
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(services.listPosts.mock.calls[0].arguments, [
+        { includeAll: false, tag: "ia", page: 3, limit: 5, q: "node streams" }
+      ])
+    })
+
+    it("trata q vazio ou só com espaços como busca ausente", async () => {
+      await request(buildServer()).get("/posts?q=%20%20%20").expect(200)
+      await request(buildServer()).get("/posts?q=").expect(200)
+
+      for (const call of services.listPosts.mock.calls) {
+        assert.equal(call.arguments[0]?.q, undefined)
+      }
+    })
+
+    const invalidQueries = [
+      { query: "page=0", field: "page" },
+      { query: "page=-1", field: "page" },
+      { query: "page=1.5", field: "page" },
+      { query: "limit=0", field: "limit" },
+      { query: "limit=51", field: "limit" },
+      { query: "limit=abc", field: "limit" },
+      { query: `q=${"x".repeat(201)}`, field: "q" }
+    ]
+
+    for (const { query, field } of invalidQueries) {
+      it(`responde 400 para ${query.slice(0, 20)}`, async () => {
+        const res = await request(buildServer()).get(`/posts?${query}`)
+
+        assert.equal(res.status, 400)
+        assert.equal(res.body.message, "Invalid query parameters")
+        assert.equal(res.body.errors[0].field, field)
         assert.equal(services.listPosts.mock.callCount(), 0)
       })
     }

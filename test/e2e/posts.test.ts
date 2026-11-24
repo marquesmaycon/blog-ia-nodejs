@@ -54,7 +54,10 @@ describe("E2E /posts", () => {
     assert.equal(draft.approved_at, null)
 
     // 2. Rascunho não aparece na listagem pública, mas aparece com include=all
-    assert.deepEqual((await api().get("/posts").expect(200)).body, { data: [] })
+    assert.deepEqual((await api().get("/posts").expect(200)).body, {
+      data: [],
+      meta: { page: 1, limit: 10, total: 0 }
+    })
 
     const all = await api().get("/posts?include=all").set(auth).expect(200)
     assert.deepEqual(
@@ -83,7 +86,10 @@ describe("E2E /posts", () => {
     assert.equal(rejected.body.data.approved_at, null)
     assert.ok(rejected.body.data.rejected_at)
 
-    assert.deepEqual((await api().get("/posts").expect(200)).body, { data: [] })
+    assert.deepEqual((await api().get("/posts").expect(200)).body, {
+      data: [],
+      meta: { page: 1, limit: 10, total: 0 }
+    })
     await api().get(`/posts/${draft.id}`).expect(200)
 
     // 6. Pode ser aprovado de novo
@@ -105,6 +111,43 @@ describe("E2E /posts", () => {
       res.body.data.map((post: Post) => post.id),
       [second.id, first.id]
     )
+  })
+
+  it("pagina e busca a listagem pública, com meta coerente", async () => {
+    const titles = ["Streams no Node", "Testes com node:test", "Filas com BullMQ"]
+    for (const title of titles) {
+      mockGeneratedPost(
+        title,
+        `## ${title}
+
+Conteúdo sobre ${title}.`
+      )
+      const res = await api().post("/posts/draft").set(auth).send({ idea: title }).expect(201)
+      await api().patch(`/posts/${res.body.data.id}/approve`).set(auth).expect(200)
+    }
+
+    // Aprovados em sequência: o mais recente vem primeiro
+    const page1 = await api().get("/posts?limit=2").expect(200)
+    const page2 = await api().get("/posts?limit=2&page=2").expect(200)
+    const page3 = await api().get("/posts?limit=2&page=3").expect(200)
+
+    assert.deepEqual(
+      [...page1.body.data, ...page2.body.data].map((post: Post) => post.title),
+      titles.toReversed()
+    )
+    assert.deepEqual(page1.body.meta, { page: 1, limit: 2, total: 3 })
+    assert.deepEqual(page2.body.meta, { page: 2, limit: 2, total: 3 })
+    assert.deepEqual(page3.body, { data: [], meta: { page: 3, limit: 2, total: 3 } })
+
+    const search = await api().get("/posts?q=testes").expect(200)
+    assert.deepEqual(
+      search.body.data.map((post: Post) => post.title),
+      ["Testes com node:test"]
+    )
+    assert.equal(search.body.meta.total, 1)
+
+    await api().get("/posts?limit=0").expect(400)
+    await api().get("/posts?page=abc").expect(400)
   })
 
   describe("autorização de include=all", () => {
