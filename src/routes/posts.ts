@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { hasValidApiKey } from "../http/auth.ts"
+import { requireApiKey } from "../http/auth.ts"
 import { approvePost, createPostDraft, getPost, listPosts, rejectPost } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
@@ -18,9 +18,7 @@ export function registerPostRoutes(app: App) {
 
     const includeAll = include === "all"
 
-    if (includeAll && !hasValidApiKey(req)) {
-      return res.status(403).send({ message: "Forbidden" })
-    }
+    if (includeAll && !requireApiKey(req, res)) return
 
     try {
       const posts = await listPosts({ includeAll })
@@ -47,6 +45,8 @@ export function registerPostRoutes(app: App) {
   })
 
   app.patch("/posts/:id/approve", async (req, res) => {
+    if (!requireApiKey(req, res)) return
+
     try {
       const post = await approvePost(req.params.id)
 
@@ -62,6 +62,8 @@ export function registerPostRoutes(app: App) {
   })
 
   app.delete("/posts/:id/reject", async (req, res) => {
+    if (!requireApiKey(req, res)) return
+
     try {
       const post = await rejectPost(req.params.id)
 
@@ -77,6 +79,9 @@ export function registerPostRoutes(app: App) {
   })
 
   app.post("/posts/draft", async (req, res) => {
+    // Auth antes da validação: anônimo recebe 403 e nunca chega ao LLM
+    if (!requireApiKey(req, res)) return
+
     const parsed = createPostDraftBodySchema.safeParse(req.body)
     if (!parsed.success) {
       return res.status(400).send({ message: "Field 'idea' is required" })

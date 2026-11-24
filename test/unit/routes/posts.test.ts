@@ -29,6 +29,8 @@ const post: Post = {
   rejected_at: null
 }
 
+const auth = { Authorization: "Bearer secret" }
+
 function buildServer() {
   const app = createApp()
   registerPostRoutes(app)
@@ -105,6 +107,49 @@ describe("rotas /posts", () => {
     })
   })
 
+  describe("rotas administrativas exigem API key", () => {
+    const adminRoutes = [
+      {
+        name: "PATCH /posts/:id/approve",
+        send: () => request(buildServer()).patch("/posts/abc/approve"),
+        service: services.approvePost
+      },
+      {
+        name: "DELETE /posts/:id/reject",
+        send: () => request(buildServer()).delete("/posts/abc/reject"),
+        service: services.rejectPost
+      },
+      {
+        name: "POST /posts/draft",
+        send: () => request(buildServer()).post("/posts/draft").send({ idea: "testes" }),
+        service: services.createPostDraft
+      }
+    ]
+
+    for (const { name, send, service } of adminRoutes) {
+      it(`${name} responde 403 sem API key e não chama o service`, async () => {
+        const res = await send()
+
+        assert.equal(res.status, 403)
+        assert.deepEqual(res.body, { message: "Forbidden" })
+        assert.equal(service.mock.callCount(), 0)
+      })
+
+      it(`${name} responde 403 com API key inválida`, async () => {
+        const res = await send().set("Authorization", "Bearer wrong")
+
+        assert.equal(res.status, 403)
+        assert.equal(service.mock.callCount(), 0)
+      })
+    }
+
+    it("POST /posts/draft checa a API key antes de validar o body", async () => {
+      const res = await request(buildServer()).post("/posts/draft").send({})
+
+      assert.equal(res.status, 403)
+    })
+  })
+
   describe("GET /posts/:id", () => {
     it("retorna o post encontrado", async () => {
       services.getPost.mock.mockImplementationOnce(async () => post)
@@ -139,7 +184,7 @@ describe("rotas /posts", () => {
       const approved = { ...post, approved_at: "2026-01-02T00:00:00.000Z" }
       services.approvePost.mock.mockImplementationOnce(async () => approved)
 
-      const res = await request(buildServer()).patch("/posts/abc/approve")
+      const res = await request(buildServer()).patch("/posts/abc/approve").set(auth)
 
       assert.equal(res.status, 200)
       assert.deepEqual(res.body, { message: "Post approved", data: approved })
@@ -147,7 +192,7 @@ describe("rotas /posts", () => {
     })
 
     it("responde 404 quando o post não existe", async () => {
-      const res = await request(buildServer()).patch("/posts/missing/approve")
+      const res = await request(buildServer()).patch("/posts/missing/approve").set(auth)
 
       assert.equal(res.status, 404)
     })
@@ -157,7 +202,7 @@ describe("rotas /posts", () => {
         throw new Error("db down")
       })
 
-      const res = await request(buildServer()).patch("/posts/abc/approve")
+      const res = await request(buildServer()).patch("/posts/abc/approve").set(auth)
 
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Failed to approve post" })
@@ -169,14 +214,14 @@ describe("rotas /posts", () => {
       const rejected = { ...post, rejected_at: "2026-01-02T00:00:00.000Z" }
       services.rejectPost.mock.mockImplementationOnce(async () => rejected)
 
-      const res = await request(buildServer()).delete("/posts/abc/reject")
+      const res = await request(buildServer()).delete("/posts/abc/reject").set(auth)
 
       assert.equal(res.status, 200)
       assert.deepEqual(res.body, { message: "Post rejected", data: rejected })
     })
 
     it("responde 404 quando o post não existe", async () => {
-      const res = await request(buildServer()).delete("/posts/missing/reject")
+      const res = await request(buildServer()).delete("/posts/missing/reject").set(auth)
 
       assert.equal(res.status, 404)
     })
@@ -186,7 +231,7 @@ describe("rotas /posts", () => {
         throw new Error("db down")
       })
 
-      const res = await request(buildServer()).delete("/posts/abc/reject")
+      const res = await request(buildServer()).delete("/posts/abc/reject").set(auth)
 
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Failed to reject post" })
@@ -195,7 +240,10 @@ describe("rotas /posts", () => {
 
   describe("POST /posts/draft", () => {
     it("cria o rascunho a partir da ideia (com trim)", async () => {
-      const res = await request(buildServer()).post("/posts/draft").send({ idea: "  testes  " })
+      const res = await request(buildServer())
+        .post("/posts/draft")
+        .set(auth)
+        .send({ idea: "  testes  " })
 
       assert.equal(res.status, 201)
       assert.deepEqual(res.body, { message: "Post draft created", data: post })
@@ -209,7 +257,7 @@ describe("rotas /posts", () => {
       ["com idea que não é string", { idea: 123 }]
     ] as const) {
       it(`responde 400 ${name}`, async () => {
-        const res = await request(buildServer()).post("/posts/draft").send(body)
+        const res = await request(buildServer()).post("/posts/draft").set(auth).send(body)
 
         assert.equal(res.status, 400)
         assert.deepEqual(res.body, { message: "Field 'idea' is required" })
@@ -222,7 +270,10 @@ describe("rotas /posts", () => {
         throw new Error("LLM indisponível")
       })
 
-      const res = await request(buildServer()).post("/posts/draft").send({ idea: "testes" })
+      const res = await request(buildServer())
+        .post("/posts/draft")
+        .set(auth)
+        .send({ idea: "testes" })
 
       assert.equal(res.status, 502)
       assert.deepEqual(res.body, { message: "Failed to generate post" })

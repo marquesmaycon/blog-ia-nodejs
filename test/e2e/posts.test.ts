@@ -29,7 +29,7 @@ function mockGeneratedPost(title: string, content = `## ${title}\n\nConteúdo.`)
 
 async function createDraft(idea: string): Promise<Post> {
   mockGeneratedPost(`Post sobre ${idea}`)
-  const res = await api().post("/posts/draft").send({ idea }).expect(201)
+  const res = await api().post("/posts/draft").set(auth).send({ idea }).expect(201)
   return res.body.data
 }
 
@@ -41,7 +41,11 @@ describe("E2E /posts", () => {
   it("ciclo de vida: rascunho → aprovado → reprovado", async () => {
     // 1. Gera o rascunho
     mockGeneratedPost("Testes com node:test", "## Intro\n\nTexto.")
-    const created = await api().post("/posts/draft").send({ idea: "testes no node" }).expect(201)
+    const created = await api()
+      .post("/posts/draft")
+      .set(auth)
+      .send({ idea: "testes no node" })
+      .expect(201)
 
     const draft: Post = created.body.data
     assert.equal(created.body.message, "Post draft created")
@@ -63,7 +67,7 @@ describe("E2E /posts", () => {
     assert.deepEqual(fetched.body.data, draft)
 
     // 4. Aprova: passa a aparecer na listagem pública
-    const approved = await api().patch(`/posts/${draft.id}/approve`).expect(200)
+    const approved = await api().patch(`/posts/${draft.id}/approve`).set(auth).expect(200)
     assert.equal(approved.body.message, "Post approved")
     assert.ok(approved.body.data.approved_at)
 
@@ -74,7 +78,7 @@ describe("E2E /posts", () => {
     )
 
     // 5. Reprova: some da listagem pública, continua existindo
-    const rejected = await api().delete(`/posts/${draft.id}/reject`).expect(200)
+    const rejected = await api().delete(`/posts/${draft.id}/reject`).set(auth).expect(200)
     assert.equal(rejected.body.message, "Post rejected")
     assert.equal(rejected.body.data.approved_at, null)
     assert.ok(rejected.body.data.rejected_at)
@@ -83,7 +87,7 @@ describe("E2E /posts", () => {
     await api().get(`/posts/${draft.id}`).expect(200)
 
     // 6. Pode ser aprovado de novo
-    const reapproved = await api().patch(`/posts/${draft.id}/approve`).expect(200)
+    const reapproved = await api().patch(`/posts/${draft.id}/approve`).set(auth).expect(200)
     assert.equal(reapproved.body.data.rejected_at, null)
   })
 
@@ -92,8 +96,8 @@ describe("E2E /posts", () => {
     const second = await createDraft("segundo")
     await createDraft("rascunho")
 
-    await api().patch(`/posts/${first.id}/approve`).expect(200)
-    await api().patch(`/posts/${second.id}/approve`).expect(200)
+    await api().patch(`/posts/${first.id}/approve`).set(auth).expect(200)
+    await api().patch(`/posts/${second.id}/approve`).set(auth).expect(200)
 
     const res = await api().get("/posts").expect(200)
 
@@ -117,13 +121,39 @@ describe("E2E /posts", () => {
     })
   })
 
+  describe("autorização das rotas administrativas", () => {
+    it("responde 403 sem API key ao aprovar ou reprovar, sem alterar o post", async () => {
+      const draft = await createDraft("protegido")
+      const forbidden = { message: "Forbidden" }
+
+      await api().patch(`/posts/${draft.id}/approve`).expect(403, forbidden)
+      await api().delete(`/posts/${draft.id}/reject`).expect(403, forbidden)
+
+      const fetched = await api().get(`/posts/${draft.id}`).expect(200)
+      assert.deepEqual(fetched.body.data, draft)
+    })
+
+    it("responde 403 sem API key ao gerar rascunho e não chama o LLM", async () => {
+      const getAgent = mockGeneratedPost("não deveria gerar")
+
+      await api().post("/posts/draft").send({ idea: "qualquer" }).expect(403)
+      await api()
+        .post("/posts/draft")
+        .set("Authorization", "Bearer errada")
+        .send({ idea: "qualquer" })
+        .expect(403)
+
+      assert.equal(getAgent.mock.callCount(), 0)
+    })
+  })
+
   describe("erros", () => {
     it("responde 404 para post inexistente em todas as rotas por id", async () => {
       const notFound = { message: "Post not found" }
 
       await api().get("/posts/inexistente").expect(404, notFound)
-      await api().patch("/posts/inexistente/approve").expect(404, notFound)
-      await api().delete("/posts/inexistente/reject").expect(404, notFound)
+      await api().patch("/posts/inexistente/approve").set(auth).expect(404, notFound)
+      await api().delete("/posts/inexistente/reject").set(auth).expect(404, notFound)
     })
 
     it("responde 404 para rota inexistente", async () => {
@@ -133,6 +163,7 @@ describe("E2E /posts", () => {
     it("responde 400 para JSON inválido", async () => {
       await api()
         .post("/posts/draft")
+        .set(auth)
         .set("Content-Type", "application/json")
         .send("{idea")
         .expect(400, { message: "Invalid JSON body" })
@@ -141,7 +172,7 @@ describe("E2E /posts", () => {
     it("responde 400 sem a ideia e não chama o LLM", async () => {
       const getAgent = mockGeneratedPost("não deveria gerar")
 
-      await api().post("/posts/draft").send({ idea: "" }).expect(400)
+      await api().post("/posts/draft").set(auth).send({ idea: "" }).expect(400)
 
       assert.equal(getAgent.mock.callCount(), 0)
     })
@@ -154,6 +185,7 @@ describe("E2E /posts", () => {
 
       await api()
         .post("/posts/draft")
+        .set(auth)
         .send({ idea: "qualquer" })
         .expect(502, { message: "Failed to generate post" })
 
