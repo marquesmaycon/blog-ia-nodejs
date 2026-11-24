@@ -118,7 +118,7 @@ export const openApiSpec = {
         tags: ["Posts"],
         summary: "Lista os posts",
         description:
-          "Lista os posts aprovados, do mais recente para o mais antigo. Com `include=all`, lista todos os posts (rascunhos e reprovados também) e exige a API key. Com `tag`, filtra pelos posts que têm a tag (uma tag inexistente devolve lista vazia).",
+          "Lista os posts aprovados, do mais recente para o mais antigo, em páginas (`page` e `limit`). Com `include=all`, lista todos os posts (rascunhos e reprovados também) e exige a API key. Com `tag`, filtra pelos posts que têm a tag (uma tag inexistente devolve lista vazia). Com `q`, faz busca full-text em português no título e no conteúdo e ordena por relevância (match no título pesa mais). Uma página além do fim devolve `data` vazio com o `total` real.",
         parameters: [
           {
             name: "include",
@@ -138,26 +138,49 @@ export const openApiSpec = {
               pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
               example: "node-js"
             }
+          },
+          {
+            name: "q",
+            in: "query",
+            required: false,
+            description:
+              'Texto da busca full-text. Aceita sintaxe de buscador: `"frase exata"`, `-excluir`, `or`. Vazio é ignorado.',
+            schema: { type: "string", maxLength: 200, example: "node streams" }
+          },
+          {
+            name: "page",
+            in: "query",
+            required: false,
+            description: "Página, começando em 1",
+            schema: { type: "integer", minimum: 1, default: 1 }
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: false,
+            description: "Posts por página",
+            schema: { type: "integer", minimum: 1, maximum: 50, default: 10 }
           }
         ],
         security: [{}, { bearerAuth: [] }],
         responses: {
           "200": {
-            description: "Lista de posts",
+            description: "Página de posts",
             content: {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["data"],
+                  required: ["data", "meta"],
                   properties: {
-                    data: { type: "array", items: { $ref: "#/components/schemas/Post" } }
+                    data: { type: "array", items: { $ref: "#/components/schemas/Post" } },
+                    meta: { $ref: "#/components/schemas/PaginationMeta" }
                   }
                 }
               }
             }
           },
           "400": validationErrorResponse(
-            "`include` com valor diferente de `all`, ou `tag` que não é um slug"
+            "`include` com valor diferente de `all`, `tag` que não é um slug, `q` com mais de 200 caracteres, ou `page`/`limit` fora dos limites"
           ),
           "403": errorResponse("`include=all` sem API key válida"),
           "500": errorResponse("Falha ao listar os posts")
@@ -530,6 +553,20 @@ export const openApiSpec = {
       }
     },
     schemas: {
+      PaginationMeta: {
+        type: "object",
+        required: ["page", "limit", "total"],
+        properties: {
+          page: { type: "integer", minimum: 1, example: 1 },
+          limit: { type: "integer", minimum: 1, maximum: 50, example: 10 },
+          total: {
+            type: "integer",
+            minimum: 0,
+            description: "Total de posts que batem com os filtros, sem considerar a paginação",
+            example: 42
+          }
+        }
+      },
       Post: {
         type: "object",
         required: [

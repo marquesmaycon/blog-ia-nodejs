@@ -161,24 +161,29 @@ curl -X POST http://localhost:8080/posts/draft \
 
 ### `GET /posts`
 
-Lista os posts aprovados, do mais recente para o mais antigo.
+Lista os posts aprovados, do mais recente para o mais antigo, em páginas.
 
-Com `?include=all`, lista todos os posts (rascunhos e reprovados também), mas exige a API key. Com `?tag=<slug>`, filtra pelos posts que têm a tag. Os dois parâmetros podem ser combinados, e uma tag que não existe devolve lista vazia:
+Com `?include=all`, lista todos os posts (rascunhos e reprovados também), mas exige a API key. Com `?tag=<slug>`, filtra pelos posts que têm a tag. Todos os parâmetros podem ser combinados, e uma tag que não existe devolve lista vazia.
+
+- **Paginação:** `?page=` (a partir de 1, padrão 1) e `?limit=` (de 1 a 50, padrão 10). Uma página além do fim devolve `data` vazio com o `total` real.
+- **Busca:** `?q=` faz busca full-text em português no título e no conteúdo (`"testes"` encontra `"teste"`) e ordena por relevância, com match no título pesando mais. Aceita sintaxe de buscador: `"frase exata"`, `-excluir` e `or`. Acentos contam: `"migracao"` não encontra `"migração"`.
 
 ```bash
 curl http://localhost:8080/posts
 
 curl "http://localhost:8080/posts?tag=node-js"
 
+curl "http://localhost:8080/posts?q=node&page=2&limit=5"
+
 curl "http://localhost:8080/posts?include=all" \
   -H "Authorization: Bearer $API_KEY"
 ```
 
-| Status | Quando                                                       |
-| ------ | ------------------------------------------------------------ |
-| `200`  | `{ data: Post[] }`                                           |
-| `400`  | `include` diferente de `all`, ou `tag` que não é slug        |
-| `403`  | `include=all` sem API key válida (ou `API_KEY` não definida) |
+| Status | Quando                                                                                                          |
+| ------ | --------------------------------------------------------------------------------------------------------------- |
+| `200`  | `{ data: Post[], meta: { page, limit, total } }`                                                                |
+| `400`  | `include` diferente de `all`, `tag` que não é slug, `q` com mais de 200 caracteres, ou `page`/`limit` inválidos |
+| `403`  | `include=all` sem API key válida (ou `API_KEY` não definida)                                                    |
 
 ### `GET /posts/:id`
 
