@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import type { App } from "../http/app.ts"
 import { requireApiKey } from "../http/auth.ts"
+import { sendValidationError } from "../http/validation.ts"
 import { approvePost, createPostDraft, getPost, listPosts, rejectPost } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
@@ -83,9 +84,7 @@ export function registerPostRoutes(app: App) {
     if (!requireApiKey(req, res)) return
 
     const parsed = createPostDraftBodySchema.safeParse(req.body)
-    if (!parsed.success) {
-      return res.status(400).send({ message: "Field 'idea' is required" })
-    }
+    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
 
     try {
       const post = await createPostDraft(parsed.data.idea)

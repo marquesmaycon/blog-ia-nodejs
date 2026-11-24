@@ -260,10 +260,20 @@ describe("rotas /posts", () => {
         const res = await request(buildServer()).post("/posts/draft").set(auth).send(body)
 
         assert.equal(res.status, 400)
-        assert.deepEqual(res.body, { message: "Field 'idea' is required" })
+        assert.equal(res.body.message, "Invalid request body")
+        assert.ok(res.body.errors.length > 0)
         assert.equal(services.createPostDraft.mock.callCount(), 0)
       })
     }
+
+    it("aponta o campo idea no erro de validação", async () => {
+      const res = await request(buildServer()).post("/posts/draft").set(auth).send({ idea: "" })
+
+      assert.deepEqual(res.body, {
+        message: "Invalid request body",
+        errors: [{ field: "idea", message: "Too small: expected string to have >=1 characters" }]
+      })
+    })
 
     it("responde 502 quando a geração falha", async () => {
       services.createPostDraft.mock.mockImplementationOnce(async () => {
