@@ -103,6 +103,14 @@ const tagSlugParam = {
   schema: { type: "string", example: "node-js" }
 }
 
+const postSlugParam = {
+  name: "slug",
+  in: "path",
+  required: true,
+  description: "Slug do post",
+  schema: { type: "string", maxLength: 100, example: "testes-com-node-test" }
+}
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -111,7 +119,13 @@ export const openApiSpec = {
     description:
       "API de blog em que os posts são escritos por IA. Um agente gera título e conteúdo em Markdown a partir de uma ideia, e o post fica como rascunho até ser aprovado."
   },
-  tags: [{ name: "Posts" }, { name: "Comments" }, { name: "Likes" }, { name: "Tags" }],
+  tags: [
+    { name: "Posts" },
+    { name: "Comments" },
+    { name: "Likes" },
+    { name: "Tags" },
+    { name: "Feed" }
+  ],
   paths: {
     "/posts": {
       get: {
@@ -261,6 +275,20 @@ export const openApiSpec = {
         }
       }
     },
+    "/posts/slug/{slug}": {
+      get: {
+        tags: ["Posts"],
+        summary: "Busca um post publicado pelo slug",
+        description: "URL pública do post. Rascunhos e reprovados respondem 404.",
+        parameters: [postSlugParam],
+        responses: {
+          "200": postResponse("Post encontrado"),
+          "400": validationErrorResponse("Slug em formato inválido"),
+          "404": errorResponse("Nenhum post publicado com esse slug"),
+          "500": errorResponse("Falha ao buscar o post")
+        }
+      }
+    },
     "/posts/{id}": {
       get: {
         tags: ["Posts"],
@@ -271,6 +299,28 @@ export const openApiSpec = {
           "200": postResponse("Post encontrado"),
           "404": errorResponse("Post não encontrado"),
           "500": errorResponse("Falha ao buscar o post")
+        }
+      },
+      put: {
+        tags: ["Posts"],
+        summary: "Edita um rascunho",
+        description:
+          "Substitui título e conteúdo de um post ainda não aprovado (rascunho ou reprovado). Recalcula `reading_time_minutes` e, se o título mudou, regera o `slug`. Requer API key.",
+        parameters: [idParam],
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/UpdatePostBody" } }
+          }
+        },
+        responses: {
+          "200": postResponse("Post editado", true),
+          "400": validationErrorResponse("`title` ou `content` ausente, vazio ou inválido"),
+          "403": forbiddenResponse,
+          "404": errorResponse("Post não encontrado"),
+          "409": errorResponse("Post já aprovado não pode ser editado"),
+          "500": errorResponse("Falha ao editar o post")
         }
       }
     },
@@ -475,6 +525,21 @@ export const openApiSpec = {
         }
       }
     },
+    "/feed.xml": {
+      get: {
+        tags: ["Feed"],
+        summary: "Feed RSS dos posts publicados",
+        description:
+          "RSS 2.0 com os 20 posts aprovados mais recentes. Os links apontam para `/posts/slug/{slug}` a partir de `SITE_URL`.",
+        responses: {
+          "200": {
+            description: "Feed RSS",
+            content: { "application/rss+xml": { schema: { type: "string" } } }
+          },
+          "500": errorResponse("Falha ao gerar o feed")
+        }
+      }
+    },
     "/comments": {
       get: {
         tags: ["Comments"],
@@ -571,8 +636,10 @@ export const openApiSpec = {
         type: "object",
         required: [
           "id",
+          "slug",
           "title",
           "content",
+          "reading_time_minutes",
           "published_at",
           "approved_at",
           "rejected_at",
@@ -582,8 +649,19 @@ export const openApiSpec = {
         ],
         properties: {
           id: { type: "string", example: "V1StGXR8_Z5jdHi6B-myT" },
+          slug: {
+            type: "string",
+            description: "Único, gerado do título; repetidos ganham sufixo (-2, -3...)",
+            example: "titulo-do-post"
+          },
           title: { type: "string", example: "Título do post" },
           content: { type: "string", description: "Conteúdo em Markdown" },
+          reading_time_minutes: {
+            type: "integer",
+            minimum: 1,
+            description: "Estimativa a 200 palavras por minuto",
+            example: 4
+          },
           published_at: { type: "string", format: "date-time" },
           approved_at: { type: ["string", "null"], format: "date-time" },
           rejected_at: { type: ["string", "null"], format: "date-time" },
@@ -599,6 +677,14 @@ export const openApiSpec = {
             description: "Ordenadas pelo nome",
             items: { $ref: "#/components/schemas/Tag" }
           }
+        }
+      },
+      UpdatePostBody: {
+        type: "object",
+        required: ["title", "content"],
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200, example: "Novo título" },
+          content: { type: "string", minLength: 1, description: "Conteúdo em Markdown" }
         }
       },
       Tag: {

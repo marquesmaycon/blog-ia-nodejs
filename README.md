@@ -25,10 +25,13 @@ src/
 │   ├── posts.ts           # rotas /posts
 │   ├── comments.ts        # rotas de comentários
 │   ├── likes.ts           # rotas de curtidas e posts populares
-│   └── tags.ts            # rotas de tags
-├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas, tags)
+│   ├── tags.ts            # rotas de tags
+│   └── feed.ts            # feed RSS (/feed.xml)
+├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas, tags, feed)
 ├── repositories/          # acesso ao Postgres (posts, comments, likes, tags)
-├── utils/slugify.ts       # gera slugs ASCII (ex.: "Node.js" -> "node-js")
+├── utils/
+│   ├── slugify.ts         # gera slugs ASCII (ex.: "Node.js" -> "node-js")
+│   └── reading-time.ts    # estimativa de tempo de leitura (200 palavras/min)
 ├── mastra/                # instância Mastra e agente post-writer
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
@@ -72,6 +75,7 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 | `API_PORT`          | Porta do servidor                                       | `8080`                                            |
 | `API_PROTOCOL`      | Usado apenas no log de inicialização                    | `http`                                            |
 | `API_KEY`           | Bearer token das rotas administrativas (ver Endpoints)  | vazio, ou seja, o acesso protegido fica bloqueado |
+| `SITE_URL`          | URL pública do blog, usada nos links do RSS             | `API_PROTOCOL://API_HOST:API_PORT`                |
 | `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra | `google/gemini-2.5-flash`                         |
 | `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)          | —                                                 |
 | `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`               | —                                                 |
@@ -114,7 +118,7 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 }
 ```
 
-As rotas administrativas (`POST /posts/draft`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+As rotas administrativas (`POST /posts/draft`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
@@ -123,8 +127,10 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
 ```json
 {
   "id": "V1StGXR8_Z5jdHi6B-myT",
+  "slug": "titulo-do-post",
   "title": "Título do post",
   "content": "Conteúdo em **Markdown**...",
+  "reading_time_minutes": 4,
   "published_at": "2026-11-19T12:00:00.000Z",
   "approved_at": "2026-11-19T12:00:00.000Z",
   "rejected_at": null,
@@ -136,6 +142,8 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
   ]
 }
 ```
+
+O `slug` é único e gerado do título. Títulos repetidos ganham sufixo (`-2`, `-3`...) e, quando o título não tem letras nem dígitos, o slug vira `post`. O `reading_time_minutes` é estimado a 200 palavras por minuto, com mínimo de 1. Os dois são gravados ao criar o post e recalculados ao editar.
 
 `likes_count`, `comments_count` e `tags` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados, e `tags` vem ordenado pelo nome.
 
@@ -193,6 +201,47 @@ Retorna um post pelo id, independentemente do status.
 | ------ | ------------------- |
 | `200`  | `{ data: Post }`    |
 | `404`  | Post não encontrado |
+
+### `GET /posts/slug/:slug`
+
+URL pública do post: só retorna posts **publicados**. Rascunhos e reprovados respondem `404`.
+
+```bash
+curl http://localhost:8080/posts/slug/titulo-do-post
+```
+
+| Status | Quando                              |
+| ------ | ----------------------------------- |
+| `200`  | `{ data: Post }`                    |
+| `400`  | Slug em formato inválido            |
+| `404`  | Nenhum post publicado com esse slug |
+
+### `PUT /posts/:id`
+
+Edita o título e o conteúdo de um post ainda **não aprovado** (rascunho ou reprovado). Os dois campos são obrigatórios. O `reading_time_minutes` é recalculado e, se o título mudou, o `slug` é regerado, o que é seguro porque o post ainda não tem URL pública. Depois de aprovado, o post não pode mais ser editado.
+
+```bash
+curl -X PUT http://localhost:8080/posts/<id> \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "title": "Novo título", "content": "## Conteúdo revisado" }'
+```
+
+| Status | Quando                                                        |
+| ------ | ------------------------------------------------------------- |
+| `200`  | `{ message: "Post updated", data: Post }`                     |
+| `400`  | `title` (1 a 200 caracteres) ou `content` ausente ou inválido |
+| `403`  | API key ausente ou inválida                                   |
+| `404`  | Post não encontrado                                           |
+| `409`  | Post já aprovado                                              |
+
+### `GET /feed.xml`
+
+Feed RSS 2.0 com os 20 posts aprovados mais recentes. Cada item aponta para `SITE_URL/posts/slug/<slug>`, e a descrição é um trecho do conteúdo sem a marcação Markdown.
+
+```bash
+curl http://localhost:8080/feed.xml
+```
 
 ### `PATCH /posts/:id/approve`
 
