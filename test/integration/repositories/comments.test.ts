@@ -37,7 +37,33 @@ describe("repositories/comments", () => {
       assert.equal(comment.content, "Muito bom!")
       assert.equal(comment.status, "pending")
       assert.equal(comment.moderation_reason, null)
+      assert.deepEqual(comment.moderation_categories, [])
       assert.match(comment.created_at, ISO_DATE)
+    })
+
+    it("persiste o veredito da moderação quando informado", async () => {
+      const comment = await insertComment({
+        post_id: post.id,
+        author_name: "Spammer",
+        content: "Compre já",
+        status: "rejected",
+        moderation_reason: "Propaganda",
+        moderation_categories: ["spam", "self-promotion"]
+      })
+
+      assert.equal(comment.status, "rejected")
+      assert.equal(comment.moderation_reason, "Propaganda")
+      assert.deepEqual(comment.moderation_categories, ["spam", "self-promotion"])
+
+      const { rows } = await pool.query(
+        "SELECT status, moderation_reason, moderation_categories FROM comments WHERE id = $1",
+        [comment.id]
+      )
+      assert.deepEqual(rows[0], {
+        status: "rejected",
+        moderation_reason: "Propaganda",
+        moderation_categories: ["spam", "self-promotion"]
+      })
     })
 
     it("rejeita post inexistente (FK)", async () => {
@@ -95,11 +121,12 @@ describe("repositories/comments", () => {
   })
 
   describe("approveCommentById", () => {
-    it("aprova e limpa moderation_reason", async () => {
+    it("aprova e limpa moderation_reason e moderation_categories", async () => {
       const seeded = await seedComment({
         post_id: post.id,
         status: "rejected",
-        moderation_reason: "spam"
+        moderation_reason: "spam",
+        moderation_categories: ["spam"]
       })
 
       const approved = await approveCommentById(seeded.id)
@@ -107,6 +134,7 @@ describe("repositories/comments", () => {
       assert.ok(approved)
       assert.equal(approved.status, "approved")
       assert.equal(approved.moderation_reason, null)
+      assert.deepEqual(approved.moderation_categories, [])
     })
 
     it("retorna null quando o comentário não existe", async () => {

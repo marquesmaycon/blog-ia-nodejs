@@ -5,6 +5,10 @@ import { beforeEach, describe, it, mock } from "node:test"
 
 import type { Comment, CommentStatus, NewComment } from "../../../src/repositories/comments.ts"
 import type { Post } from "../../../src/repositories/posts.ts"
+import type {
+  CommentToModerate,
+  ModerationResult
+} from "../../../src/services/comment-moderation.ts"
 
 const approvedPost: Post = {
   id: "post-1",
@@ -27,6 +31,7 @@ const comment: Comment = {
   content: "Muito bom!",
   status: "pending",
   moderation_reason: null,
+  moderation_categories: [],
   created_at: "2026-01-02T00:00:00.000Z"
 }
 
@@ -42,6 +47,21 @@ const postsRepository = {
   findPostById: mock.fn(async (_id: string): Promise<Post | null> => approvedPost)
 }
 
+const rejected: ModerationResult = {
+  status: "rejected",
+  moderation_reason: "Propaganda",
+  moderation_categories: ["spam"]
+}
+
+const moderation = {
+  moderateComment: mock.fn(
+    async (_post: Post, _comment: CommentToModerate): Promise<ModerationResult> => rejected
+  )
+}
+
+mock.module(import.meta.resolve("../../../src/services/comment-moderation.ts"), {
+  exports: moderation
+})
 mock.module(import.meta.resolve("../../../src/repositories/comments.ts"), {
   exports: commentsRepository
 })
@@ -58,7 +78,11 @@ const unpublishedPosts: [string, Post | null][] = [
 
 describe("services/comments", () => {
   beforeEach(() => {
-    for (const fn of [...Object.values(commentsRepository), postsRepository.findPostById]) {
+    for (const fn of [
+      ...Object.values(commentsRepository),
+      postsRepository.findPostById,
+      moderation.moderateComment
+    ]) {
       fn.mock.resetCalls()
     }
   })
@@ -85,21 +109,27 @@ describe("services/comments", () => {
   })
 
   describe("createComment", () => {
-    it("persiste o comentário em post aprovado", async () => {
+    it("modera com o post como contexto e persiste o veredito", async () => {
       const result = await createComment("post-1", { author_name: "Bia", content: "Oi" })
 
-      assert.deepEqual(commentsRepository.insertComment.mock.calls[0].arguments, [
-        { post_id: "post-1", author_name: "Bia", content: "Oi" }
+      assert.deepEqual(moderation.moderateComment.mock.calls[0].arguments, [
+        approvedPost,
+        { author_name: "Bia", content: "Oi" }
       ])
-      assert.equal(result?.author_name, "Bia")
+      assert.deepEqual(commentsRepository.insertComment.mock.calls[0].arguments, [
+        { post_id: "post-1", author_name: "Bia", content: "Oi", ...rejected }
+      ])
+      assert.equal(result?.status, "rejected")
+      assert.equal(result?.moderation_reason, "Propaganda")
     })
 
     for (const [name, post] of unpublishedPosts) {
-      it(`retorna null e não persiste para post ${name}`, async () => {
+      it(`retorna null sem moderar nem persistir para post ${name}`, async () => {
         postsRepository.findPostById.mock.mockImplementationOnce(async () => post)
 
         assert.equal(await createComment("post-1", { author_name: "Bia", content: "Oi" }), null)
         assert.equal(commentsRepository.insertComment.mock.callCount(), 0)
+        assert.equal(moderation.moderateComment.mock.callCount(), 0)
       })
     }
   })

@@ -15,6 +15,7 @@ const comment: Comment = {
   content: "Muito bom!",
   status: "pending",
   moderation_reason: null,
+  moderation_categories: [],
   created_at: "2026-01-02T00:00:00.000Z"
 }
 
@@ -107,6 +108,24 @@ describe("rotas de comentários", () => {
         { author_name: "Ana", content: "Muito bom!" }
       ])
     })
+
+    for (const [status, message] of [
+      ["approved", "Comment published"],
+      ["rejected", "Comment rejected"],
+      ["pending", "Comment awaiting moderation"]
+    ] as const) {
+      it(`responde 201 com "${message}" quando o moderador deixa ${status}`, async () => {
+        const moderated = { ...comment, status }
+        services.createComment.mock.mockImplementationOnce(async () => moderated)
+
+        const res = await request(buildServer())
+          .post("/posts/post-1/comments")
+          .send({ author_name: "Ana", content: "Oi" })
+
+        assert.equal(res.status, 201)
+        assert.deepEqual(res.body, { message, data: moderated })
+      })
+    }
 
     for (const [name, body] of [
       ["sem body", undefined],

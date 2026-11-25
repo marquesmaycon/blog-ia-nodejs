@@ -1,10 +1,12 @@
 // Rate limiting pela API HTTP (supertest), com Postgres real (banco blog_test).
+// O moderador IA é mockado em mastra.getAgent para não chamar o provedor real.
 import assert from "node:assert/strict"
-import { after, beforeEach, describe, it } from "node:test"
+import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
 import { createApp } from "../../src/http/app.ts"
+import { mastra } from "../../src/mastra/index.ts"
 import { registerCommentRoutes } from "../../src/routes/comments.ts"
 import { registerLikeRoutes } from "../../src/routes/likes.ts"
 import { pool, seedPost, truncatePosts } from "../helpers/db.ts"
@@ -12,6 +14,10 @@ import { pool, seedPost, truncatePosts } from "../helpers/db.ts"
 const LIMIT = { max: 2, windowMs: 60_000 }
 const APPROVED = { approved_at: "2026-01-01T00:00:00.000Z" }
 const visitor = (id: string) => ({ "X-Visitor-Id": `visitor-${id}` })
+
+const reviewVerdict = async () => ({
+  object: { verdict: "review", reason: "Ok", categories: [] }
+})
 
 // Cada teste monta o próprio app para começar com a cota zerada
 function buildApi() {
@@ -22,7 +28,11 @@ function buildApi() {
 }
 
 describe("E2E rate limit", () => {
-  beforeEach(truncatePosts)
+  beforeEach(async () => {
+    await truncatePosts()
+    mock.method(mastra, "getAgent", (() => ({ generate: reviewVerdict })) as never)
+  })
+  afterEach(() => mock.restoreAll())
   after(() => pool.end())
 
   it("comentários além da cota respondem 429 e não são gravados", async () => {

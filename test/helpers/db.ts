@@ -1,5 +1,5 @@
 import { pool } from "../../src/db/index.ts"
-import type { Comment } from "../../src/repositories/comments.ts"
+import { COMMENT_COLUMNS, type Comment } from "../../src/repositories/comments.ts"
 import { POST_COLUMNS, type Post, type PostTag } from "../../src/repositories/posts.ts"
 import { slugify } from "../../src/utils/slugify.ts"
 
@@ -58,14 +58,16 @@ export async function seedComment(
     content: "Comentário de teste",
     status: "pending",
     moderation_reason: null,
+    moderation_categories: [],
     created_at: new Date().toISOString(),
     ...overrides
   }
 
   const { rows } = await pool.query<Comment>(
-    `INSERT INTO comments (id, post_id, author_name, content, status, moderation_reason, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, post_id, author_name, content, status, moderation_reason, created_at`,
+    `INSERT INTO comments
+       (id, post_id, author_name, content, status, moderation_reason, moderation_categories, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING ${COMMENT_COLUMNS}`,
     [
       comment.id,
       comment.post_id,
@@ -73,6 +75,7 @@ export async function seedComment(
       comment.content,
       comment.status,
       comment.moderation_reason,
+      comment.moderation_categories,
       comment.created_at
     ]
   )
