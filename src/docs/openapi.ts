@@ -382,7 +382,7 @@ export const openApiSpec = {
         tags: ["Comments"],
         summary: "Comenta um post",
         description:
-          "Só aceita comentários em posts aprovados. O comentário nasce com status `pending` e só aparece publicamente depois de aprovado. Limite de 5 requisições por minuto por IP.",
+          "Só aceita comentários em posts aprovados. Antes de gravar, o agente moderador (IA) avalia o comentário no contexto do post: `approve` publica na hora (`approved`, mensagem `Comment published`), `reject` reprova com motivo e categorias (`rejected`, `Comment rejected`) e `review` deixa para um humano (`pending`, `Comment awaiting moderation`). Se a IA falhar ou estourar o tempo, o comentário fica `pending`. Limite de 5 requisições por minuto por IP.",
         parameters: [idParam],
         requestBody: {
           required: true,
@@ -405,7 +405,7 @@ export const openApiSpec = {
           }
         },
         responses: {
-          "201": commentResponse("Comentário criado e aguardando moderação"),
+          "201": commentResponse("Comentário criado com o status decidido pelo moderador"),
           "400": validationErrorResponse(
             "Campos ausentes, vazios ou longos demais, ou JSON inválido"
           ),
@@ -760,6 +760,7 @@ export const openApiSpec = {
           "content",
           "status",
           "moderation_reason",
+          "moderation_categories",
           "created_at"
         ],
         properties: {
@@ -770,7 +771,16 @@ export const openApiSpec = {
           status: { type: "string", enum: ["pending", "approved", "rejected"] },
           moderation_reason: {
             type: ["string", "null"],
-            description: "Motivo da reprovação, quando houver"
+            description:
+              "Motivo dado pelo moderador IA ao reprovar ou ao mandar para revisão humana; null quando aprovado"
+          },
+          moderation_categories: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["spam", "toxic", "off-topic", "harassment", "self-promotion", "other"]
+            },
+            description: "Problemas apontados pelo moderador IA; vazio quando aprovado"
           },
           created_at: { type: "string", format: "date-time" }
         }

@@ -7,7 +7,7 @@ API de blog em que os posts são escritos por IA. Você envia uma ideia, um agen
 - **Node.js 26**, que executa TypeScript nativamente (sem etapa de transpilação)
 - Servidor HTTP próprio sobre `node:http` ([src/http/app.ts](src/http/app.ts)), sem framework
 - **PostgreSQL 17** com `pg` e migrations via `postgrator-cli`
-- **Mastra** (`@mastra/core`) para o agente redator; o modelo é configurável (Gemini por padrão)
+- **Mastra** (`@mastra/core`) para os agentes redator e moderador de comentários; os modelos são configuráveis (Gemini por padrão)
 - **Zod** para validação
 - Qualidade: `oxlint`, `oxfmt`, `commitlint` (Conventional Commits) e hooks git com `lefthook`
 
@@ -32,7 +32,7 @@ src/
 ├── utils/
 │   ├── slugify.ts         # gera slugs ASCII (ex.: "Node.js" -> "node-js")
 │   └── reading-time.ts    # estimativa de tempo de leitura (200 palavras/min)
-├── mastra/                # instância Mastra e agente post-writer
+├── mastra/                # instância Mastra e agentes post-writer e comment-moderator
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
     └── migrations/        # migrations SQL (postgrator)
@@ -69,18 +69,20 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 
 ### Variáveis de ambiente
 
-| Variável            | Descrição                                                  | Padrão                                            |
-| ------------------- | ---------------------------------------------------------- | ------------------------------------------------- |
-| `API_HOST`          | Host em que o servidor escuta                              | `localhost` (no Docker: `0.0.0.0`)                |
-| `API_PORT`          | Porta do servidor                                          | `8080`                                            |
-| `API_PROTOCOL`      | Usado apenas no log de inicialização                       | `http`                                            |
-| `API_KEY`           | Bearer token das rotas administrativas (ver Endpoints)     | vazio, ou seja, o acesso protegido fica bloqueado |
-| `SITE_URL`          | URL pública do blog, usada nos links do RSS                | `API_PROTOCOL://API_HOST:API_PORT`                |
-| `TRUST_PROXY`       | `true` para o rate limiting usar o IP do `X-Forwarded-For` | `false`, ou seja, usa o IP da conexão             |
-| `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra    | `google/gemini-2.5-flash`                         |
-| `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)             | —                                                 |
-| `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`                  | —                                                 |
-| `DATABASE_URL`      | Connection string do Postgres                              | `postgres://blog:blog@localhost:5432/blog`        |
+| Variável                        | Descrição                                                          | Padrão                                            |
+| ------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------- |
+| `API_HOST`                      | Host em que o servidor escuta                                      | `localhost` (no Docker: `0.0.0.0`)                |
+| `API_PORT`                      | Porta do servidor                                                  | `8080`                                            |
+| `API_PROTOCOL`                  | Usado apenas no log de inicialização                               | `http`                                            |
+| `API_KEY`                       | Bearer token das rotas administrativas (ver Endpoints)             | vazio, ou seja, o acesso protegido fica bloqueado |
+| `SITE_URL`                      | URL pública do blog, usada nos links do RSS                        | `API_PROTOCOL://API_HOST:API_PORT`                |
+| `TRUST_PROXY`                   | `true` para o rate limiting usar o IP do `X-Forwarded-For`         | `false`, ou seja, usa o IP da conexão             |
+| `POST_WRITER_MODEL`             | Modelo do agente no formato `provedor/modelo` do Mastra            | `google/gemini-2.5-flash`                         |
+| `COMMENT_MODERATOR_MODEL`       | Modelo do agente moderador de comentários                          | `google/gemini-2.5-flash`                         |
+| `COMMENT_MODERATION_TIMEOUT_MS` | Tempo máximo da moderação; ao estourar, o comentário fica pendente | `10000`                                           |
+| `GOOGLE_API_KEY`                | Chave do Google AI Studio (modelos `google/*`)                     | —                                                 |
+| `GROQ_API_KEY`                  | Chave da Groq, se usar um modelo `groq/*`                          | —                                                 |
+| `DATABASE_URL`                  | Connection string do Postgres                                      | `postgres://blog:blog@localhost:5432/blog`        |
 
 ### Scripts
 
@@ -286,26 +288,37 @@ curl -X DELETE http://localhost:8080/posts/<id>/reject \
   "content": "Ótimo post, obrigado!",
   "status": "pending",
   "moderation_reason": null,
+  "moderation_categories": [],
   "created_at": "2026-11-19T12:00:00.000Z"
 }
 ```
 
-`status` é `pending`, `approved` ou `rejected`. Todo comentário nasce `pending` e só aparece publicamente depois de aprovado. Comentários só existem em posts aprovados: para rascunhos, reprovados ou ids inexistentes, as rotas públicas respondem `404`. Apagar um post apaga os seus comentários.
+`status` é `pending`, `approved` ou `rejected`, e só os aprovados aparecem publicamente. `moderation_reason` e `moderation_categories` (`spam`, `toxic`, `off-topic`, `harassment`, `self-promotion`, `other`) trazem a justificativa do moderador IA quando ele reprova ou manda para revisão. Aprovar manualmente limpa os dois campos. Comentários só existem em posts aprovados: para rascunhos, reprovados ou ids inexistentes, as rotas públicas respondem `404`. Apagar um post apaga os seus comentários.
 
 ### `POST /posts/:id/comments`
 
 Comenta um post aprovado. `author_name` aceita de 1 a 80 caracteres e `content` de 1 a 2000.
 
+Antes de gravar, o agente `comment-moderator` avalia o comentário junto com o título e o começo do post, e devolve um veredito:
+
+| Veredito  | `status`   | Mensagem do `201`             |
+| --------- | ---------- | ----------------------------- |
+| `approve` | `approved` | `Comment published`           |
+| `reject`  | `rejected` | `Comment rejected`            |
+| `review`  | `pending`  | `Comment awaiting moderation` |
+
+Se o modelo falhar, devolver algo fora do schema ou passar de `COMMENT_MODERATION_TIMEOUT_MS`, o comentário fica `pending` e entra na fila de `GET /comments`. A IA nunca aprova nem bloqueia nada por falha.
+
 ```bash
 curl -X POST http://localhost:8080/posts/<id>/comments   -H "Content-Type: application/json"   -d '{ "author_name": "Ana", "content": "Ótimo post!" }'
 ```
 
-| Status | Quando                                                      |
-| ------ | ----------------------------------------------------------- |
-| `201`  | `{ message: "Comment awaiting moderation", data: Comment }` |
-| `400`  | Campos ausentes, vazios ou longos demais, ou JSON inválido  |
-| `404`  | Post não encontrado ou não aprovado                         |
-| `429`  | Mais de 5 comentários por minuto vindos do mesmo IP         |
+| Status | Quando                                                     |
+| ------ | ---------------------------------------------------------- |
+| `201`  | `{ message, data: Comment }`, com a mensagem do veredito   |
+| `400`  | Campos ausentes, vazios ou longos demais, ou JSON inválido |
+| `404`  | Post não encontrado ou não aprovado                        |
+| `429`  | Mais de 5 comentários por minuto vindos do mesmo IP        |
 
 ### `GET /posts/:id/comments`
 
