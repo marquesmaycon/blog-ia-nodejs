@@ -16,10 +16,13 @@ export async function truncatePosts() {
 export async function seedPost(
   overrides: Partial<Omit<Post, "likes_count" | "comments_count" | "tags">> = {}
 ): Promise<Post> {
+  const id = `seed-${crypto.randomUUID()}`
   const post = {
-    id: `seed-${crypto.randomUUID()}`,
+    id,
+    slug: id,
     title: "Post de teste",
     content: "# Conteúdo",
+    reading_time_minutes: 1,
     published_at: new Date().toISOString(),
     approved_at: null,
     rejected_at: null,
@@ -27,10 +30,20 @@ export async function seedPost(
   }
 
   const { rows } = await pool.query<Post>(
-    `INSERT INTO posts (id, title, content, published_at, approved_at, rejected_at)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO posts
+       (id, slug, title, content, reading_time_minutes, published_at, approved_at, rejected_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING ${POST_COLUMNS}`,
-    [post.id, post.title, post.content, post.published_at, post.approved_at, post.rejected_at]
+    [
+      post.id,
+      post.slug,
+      post.title,
+      post.content,
+      post.reading_time_minutes,
+      post.published_at,
+      post.approved_at,
+      post.rejected_at
+    ]
   )
 
   return rows[0]

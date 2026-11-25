@@ -150,6 +150,87 @@ Conteúdo sobre ${title}.`
     await api().get("/posts?page=abc").expect(400)
   })
 
+  describe("slug, edição e tempo de leitura", () => {
+    it("edita o rascunho, aprova e encontra pelo slug", async () => {
+      // 1. Rascunho nasce com slug do título e tempo de leitura
+      const draft = await createDraft("streams")
+      assert.equal(draft.slug, "post-sobre-streams")
+      assert.equal(draft.reading_time_minutes, 1)
+
+      // 2. Rascunho não tem URL pública
+      await api().get(`/posts/slug/${draft.slug}`).expect(404)
+
+      // 3. Editar o título regera o slug e recalcula o tempo de leitura
+      const content = Array.from({ length: 450 }, () => "palavra").join(" ")
+      const edited = await api()
+        .put(`/posts/${draft.id}`)
+        .set(auth)
+        .send({ title: "Streams no Node.js", content })
+        .expect(200)
+
+      assert.equal(edited.body.message, "Post updated")
+      assert.equal(edited.body.data.slug, "streams-no-node-js")
+      assert.equal(edited.body.data.reading_time_minutes, 3)
+
+      // 4. Aprovado, aparece pelo slug e não pode mais ser editado
+      await api().patch(`/posts/${draft.id}/approve`).set(auth).expect(200)
+
+      const bySlug = await api().get("/posts/slug/streams-no-node-js").expect(200)
+      assert.equal(bySlug.body.data.id, draft.id)
+      assert.equal(bySlug.body.data.content, content)
+
+      await api()
+        .put(`/posts/${draft.id}`)
+        .set(auth)
+        .send({ title: "Outro", content: "Outro" })
+        .expect(409, { message: "Approved posts cannot be edited" })
+    })
+
+    it("desempata títulos repetidos com sufixo numérico", async () => {
+      const first = await createDraft("repetido")
+      const second = await createDraft("repetido")
+      const third = await createDraft("repetido")
+
+      assert.deepEqual(
+        [first.slug, second.slug, third.slug],
+        ["post-sobre-repetido", "post-sobre-repetido-2", "post-sobre-repetido-3"]
+      )
+    })
+
+    it("manter o título na edição preserva o slug", async () => {
+      const draft = await createDraft("preservado")
+
+      const edited = await api()
+        .put(`/posts/${draft.id}`)
+        .set(auth)
+        .send({ title: draft.title, content: "Novo conteúdo" })
+        .expect(200)
+
+      assert.equal(edited.body.data.slug, draft.slug)
+    })
+
+    it("responde 403 sem API key ao editar, sem alterar o post", async () => {
+      const draft = await createDraft("protegido")
+
+      await api()
+        .put(`/posts/${draft.id}`)
+        .send({ title: "Invasão", content: "x" })
+        .expect(403, { message: "Forbidden" })
+
+      assert.equal((await api().get(`/posts/${draft.id}`).expect(200)).body.data.title, draft.title)
+    })
+
+    it("responde 404 ao editar post inexistente e 400 para slug inválido", async () => {
+      await api()
+        .put("/posts/inexistente")
+        .set(auth)
+        .send({ title: "T", content: "C" })
+        .expect(404, { message: "Post not found" })
+
+      await api().get("/posts/slug/Slug_Invalido").expect(400)
+    })
+  })
+
   describe("autorização de include=all", () => {
     it("responde 403 sem API key", async () => {
       await api().get("/posts?include=all").expect(403, { message: "Forbidden" })

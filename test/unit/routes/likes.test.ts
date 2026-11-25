@@ -10,7 +10,9 @@ import type { LikeResult, PopularPostsQuery } from "../../../src/services/likes.
 
 const popular: PopularPost = {
   id: "post-1",
+  slug: "titulo",
   title: "Título",
+  reading_time_minutes: 1,
   content: "Conteúdo",
   published_at: "2026-01-01T00:00:00.000Z",
   approved_at: "2026-01-01T00:00:00.000Z",

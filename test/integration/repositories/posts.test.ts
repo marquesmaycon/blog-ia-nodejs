@@ -7,8 +7,12 @@ import {
   findPopularPosts,
   findPostById,
   findPosts,
+  findPublishedPostBySlug,
+  findTakenSlugs,
   insertPost,
   rejectPostById,
+  updateDraftById,
+  type NewPost,
   type Post,
   type PostFilters
 } from "../../../src/repositories/posts.ts"
@@ -28,6 +32,13 @@ const APPROVED = { approved_at: "2026-01-01T00:00:00.000Z" }
 const pickCounters = (post: Post | null) => ({
   likes_count: post?.likes_count,
   comments_count: post?.comments_count
+})
+
+// Slug único por chamada, para os testes que não testam o slug em si
+const newPost = (data: Pick<NewPost, "title" | "content">): NewPost => ({
+  slug: `slug-${crypto.randomUUID()}`,
+  reading_time_minutes: 1,
+  ...data
 })
 
 const ids = (posts: Post[]) => posts.map((post) => post.id).toSorted()
@@ -62,7 +73,7 @@ describe("repositories/posts", () => {
 
   describe("insertPost", () => {
     it("persiste o post como rascunho, com id gerado e datas em ISO", async () => {
-      const post = await insertPost({ title: "Título", content: "Conteúdo" })
+      const post = await insertPost(newPost({ title: "Título", content: "Conteúdo" }))
 
       assert.equal(typeof post.id, "string")
       assert.ok(post.id.length > 0)
@@ -76,10 +87,100 @@ describe("repositories/posts", () => {
     })
 
     it("gera ids diferentes a cada inserção", async () => {
-      const a = await insertPost({ title: "A", content: "A" })
-      const b = await insertPost({ title: "B", content: "B" })
+      const a = await insertPost(newPost({ title: "A", content: "A" }))
+      const b = await insertPost(newPost({ title: "B", content: "B" }))
 
       assert.notEqual(a.id, b.id)
+    })
+  })
+
+  describe("slug e tempo de leitura", () => {
+    it("insertPost grava slug e reading_time_minutes", async () => {
+      const post = await insertPost({
+        title: "Título",
+        content: "Conteúdo",
+        slug: "titulo",
+        reading_time_minutes: 3
+      })
+
+      assert.equal(post.slug, "titulo")
+      assert.equal(post.reading_time_minutes, 3)
+    })
+
+    it("rejeita slug repetido pela constraint posts_slug_key", async () => {
+      await seedPost({ slug: "repetido" })
+
+      await assert.rejects(
+        insertPost({ title: "B", content: "B", slug: "repetido", reading_time_minutes: 1 }),
+        { code: "23505", constraint: "posts_slug_key" }
+      )
+    })
+
+    it("findTakenSlugs traz a base e as variações numéricas, só elas", async () => {
+      for (const slug of ["node", "node-2", "node-10", "node-js", "nodes", "outro"]) {
+        await seedPost({ slug })
+      }
+
+      assert.deepEqual((await findTakenSlugs("node")).toSorted(), ["node", "node-10", "node-2"])
+      assert.deepEqual(await findTakenSlugs("livre"), [])
+    })
+
+    it("findTakenSlugs ignora o post de excludeId", async () => {
+      const post = await seedPost({ slug: "meu-post" })
+      await seedPost({ slug: "meu-post-2" })
+
+      assert.deepEqual(await findTakenSlugs("meu-post", post.id), ["meu-post-2"])
+    })
+
+    it("findPublishedPostBySlug só encontra posts aprovados", async () => {
+      const published = await seedPost({ ...APPROVED, slug: "publicado" })
+      await seedPost({ slug: "rascunho" })
+      await seedPost({ slug: "reprovado", rejected_at: "2026-01-01T00:00:00.000Z" })
+
+      assert.equal((await findPublishedPostBySlug("publicado"))?.id, published.id)
+      assert.equal(await findPublishedPostBySlug("rascunho"), null)
+      assert.equal(await findPublishedPostBySlug("reprovado"), null)
+      assert.equal(await findPublishedPostBySlug("missing"), null)
+    })
+  })
+
+  describe("updateDraftById", () => {
+    const changes = {
+      title: "Novo título zebra",
+      content: "Novo conteúdo",
+      slug: "novo-titulo-zebra",
+      reading_time_minutes: 2
+    }
+
+    it("atualiza o rascunho e a coluna de busca acompanha", async () => {
+      const draft = await seedPost({ title: "Antigo" })
+
+      const updated = await updateDraftById(draft.id, changes)
+
+      assert.equal(updated?.title, changes.title)
+      assert.equal(updated?.content, changes.content)
+      assert.equal(updated?.slug, changes.slug)
+      assert.equal(updated?.reading_time_minutes, 2)
+
+      await approvePostById(draft.id)
+      assert.deepEqual(await searchIds("zebra"), [draft.id])
+    })
+
+    it("também edita posts reprovados", async () => {
+      const rejected = await seedPost({ rejected_at: "2026-01-01T00:00:00.000Z" })
+
+      assert.equal((await updateDraftById(rejected.id, changes))?.title, changes.title)
+    })
+
+    it("não altera posts aprovados e retorna null", async () => {
+      const approved = await seedPost({ ...APPROVED, title: "Original" })
+
+      assert.equal(await updateDraftById(approved.id, changes), null)
+      assert.equal((await findPostById(approved.id))?.title, "Original")
+    })
+
+    it("retorna null quando o post não existe", async () => {
+      assert.equal(await updateDraftById("missing", changes), null)
     })
   })
 
@@ -304,7 +405,7 @@ describe("repositories/posts", () => {
 
   describe("contadores", () => {
     it("começam em 0 num post novo", async () => {
-      const post = await insertPost({ title: "Título", content: "Conteúdo" })
+      const post = await insertPost(newPost({ title: "Título", content: "Conteúdo" }))
 
       assert.equal(post.likes_count, 0)
       assert.equal(post.comments_count, 0)
@@ -329,7 +430,7 @@ describe("repositories/posts", () => {
 
   describe("tags", () => {
     it("começam vazias num post novo", async () => {
-      const post = await insertPost({ title: "Título", content: "Conteúdo" })
+      const post = await insertPost(newPost({ title: "Título", content: "Conteúdo" }))
 
       assert.deepEqual(post.tags, [])
     })

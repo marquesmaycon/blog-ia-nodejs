@@ -6,13 +6,24 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 import request from "supertest"
 
 import type { Post } from "../../../src/repositories/posts.ts"
-import type { ListPostsOptions, PaginatedPosts } from "../../../src/services/posts.ts"
+import type {
+  ListPostsOptions,
+  PaginatedPosts,
+  PostContent,
+  UpdatePostDraftResult
+} from "../../../src/services/posts.ts"
 
 const emptyPage: PaginatedPosts = { data: [], meta: { page: 1, limit: 10, total: 0 } }
 
 const services = {
   listPosts: mock.fn(async (_options?: ListPostsOptions): Promise<PaginatedPosts> => emptyPage),
   getPost: mock.fn(async (_id: string): Promise<Post | null> => null),
+  getPublishedPostBySlug: mock.fn(async (_slug: string): Promise<Post | null> => null),
+  updatePostDraft: mock.fn(
+    async (_id: string, _data: PostContent): Promise<UpdatePostDraftResult> => ({
+      status: "not_found"
+    })
+  ),
   approvePost: mock.fn(async (_id: string): Promise<Post | null> => null),
   rejectPost: mock.fn(async (_id: string): Promise<Post | null> => null),
   createPostDraft: mock.fn(async (_idea: string): Promise<Post> => post)
@@ -28,7 +39,9 @@ const { registerPostRoutes } = await import("../../../src/routes/posts.ts")
 
 const post: Post = {
   id: "abc",
+  slug: "titulo",
   title: "Título",
+  reading_time_minutes: 1,
   content: "Conteúdo",
   published_at: "2026-01-01T00:00:00.000Z",
   approved_at: null,
@@ -205,6 +218,11 @@ describe("rotas /posts", () => {
         name: "POST /posts/draft",
         send: () => request(buildServer()).post("/posts/draft").send({ idea: "testes" }),
         service: services.createPostDraft
+      },
+      {
+        name: "PUT /posts/:id",
+        send: () => request(buildServer()).put("/posts/abc").send({ title: "T", content: "C" }),
+        service: services.updatePostDraft
       }
     ]
 
@@ -258,6 +276,119 @@ describe("rotas /posts", () => {
       const res = await request(buildServer()).get("/posts/abc")
 
       assert.equal(res.status, 500)
+    })
+  })
+
+  describe("GET /posts/slug/:slug", () => {
+    it("retorna o post publicado com o slug", async () => {
+      services.getPublishedPostBySlug.mock.mockImplementationOnce(async () => post)
+
+      const res = await request(buildServer()).get("/posts/slug/titulo")
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(res.body, { data: post })
+      assert.deepEqual(services.getPublishedPostBySlug.mock.calls[0].arguments, ["titulo"])
+      // O segmento estático "slug" vence o :id
+      assert.equal(services.getPost.mock.callCount(), 0)
+    })
+
+    it("responde 404 quando não há post publicado com o slug", async () => {
+      const res = await request(buildServer()).get("/posts/slug/rascunho")
+
+      assert.equal(res.status, 404)
+      assert.deepEqual(res.body, { message: "Post not found" })
+    })
+
+    for (const slug of ["Maiuscula", "com_underline", "-borda", "a--b", "x".repeat(101)]) {
+      it(`responde 400 para o slug ${JSON.stringify(slug.slice(0, 20))}`, async () => {
+        const res = await request(buildServer()).get(`/posts/slug/${slug}`)
+
+        assert.equal(res.status, 400)
+        assert.equal(res.body.message, "Invalid slug")
+        assert.equal(services.getPublishedPostBySlug.mock.callCount(), 0)
+      })
+    }
+
+    it("responde 500 quando o service falha", async () => {
+      services.getPublishedPostBySlug.mock.mockImplementationOnce(async () => {
+        throw new Error("db down")
+      })
+
+      const res = await request(buildServer()).get("/posts/slug/titulo")
+
+      assert.equal(res.status, 500)
+      assert.deepEqual(res.body, { message: "Failed to get post" })
+    })
+  })
+
+  describe("PUT /posts/:id", () => {
+    const body = { title: "  Novo título  ", content: "  Novo conteúdo  " }
+
+    it("edita o rascunho com os campos já com trim", async () => {
+      const updated = { ...post, title: "Novo título", content: "Novo conteúdo" }
+      services.updatePostDraft.mock.mockImplementationOnce(async () => ({
+        status: "updated",
+        post: updated
+      }))
+
+      const res = await request(buildServer()).put("/posts/abc").set(auth).send(body)
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(res.body, { message: "Post updated", data: updated })
+      assert.deepEqual(services.updatePostDraft.mock.calls[0].arguments, [
+        "abc",
+        { title: "Novo título", content: "Novo conteúdo" }
+      ])
+    })
+
+    it("responde 404 quando o post não existe", async () => {
+      const res = await request(buildServer()).put("/posts/missing").set(auth).send(body)
+
+      assert.equal(res.status, 404)
+      assert.deepEqual(res.body, { message: "Post not found" })
+    })
+
+    it("responde 409 quando o post já foi aprovado", async () => {
+      services.updatePostDraft.mock.mockImplementationOnce(async () => ({ status: "approved" }))
+
+      const res = await request(buildServer()).put("/posts/abc").set(auth).send(body)
+
+      assert.equal(res.status, 409)
+      assert.deepEqual(res.body, { message: "Approved posts cannot be edited" })
+    })
+
+    for (const [name, invalid, field] of [
+      ["sem title", { content: "C" }, "title"],
+      ["sem content", { title: "T" }, "content"],
+      ["com title vazio", { title: "   ", content: "C" }, "title"],
+      ["com title longo demais", { title: "x".repeat(201), content: "C" }, "title"],
+      ["com content que não é string", { title: "T", content: 1 }, "content"]
+    ] as const) {
+      it(`responde 400 ${name}`, async () => {
+        const res = await request(buildServer()).put("/posts/abc").set(auth).send(invalid)
+
+        assert.equal(res.status, 400)
+        assert.equal(res.body.message, "Invalid request body")
+        assert.equal(res.body.errors[0].field, field)
+        assert.equal(services.updatePostDraft.mock.callCount(), 0)
+      })
+    }
+
+    it("checa a API key antes de validar o body", async () => {
+      const res = await request(buildServer()).put("/posts/abc").send({})
+
+      assert.equal(res.status, 403)
+    })
+
+    it("responde 500 quando o service falha", async () => {
+      services.updatePostDraft.mock.mockImplementationOnce(async () => {
+        throw new Error("db down")
+      })
+
+      const res = await request(buildServer()).put("/posts/abc").set(auth).send(body)
+
+      assert.equal(res.status, 500)
+      assert.deepEqual(res.body, { message: "Failed to update post" })
     })
   })
 
