@@ -9,8 +9,11 @@ export type PostTag = {
 
 export type Post = {
   id: string
+  // Único; gerado do título e usado na URL pública (GET /posts/slug/:slug)
+  slug: string
   title: string
   content: string
+  reading_time_minutes: number
   published_at: string
   approved_at: string | null
   rejected_at: string | null
@@ -43,7 +46,9 @@ export type PostsPage = {
   total: number
 }
 
-export type NewPost = Pick<Post, "title" | "content">
+export type NewPost = Pick<Post, "title" | "content" | "slug" | "reading_time_minutes">
+
+export type DraftChanges = NewPost
 
 export type PopularPost = Post & {
   // Curtidas recebidas dentro da janela consultada
@@ -52,7 +57,8 @@ export type PopularPost = Post & {
 
 // Colunas qualificadas para não colidir em JOINs. As subqueries correlacionadas também
 // funcionam no RETURNING; o ::int evita que o pg devolva o COUNT (bigint) como string.
-export const POST_COLUMNS = `posts.id, posts.title, posts.content, posts.published_at,
+export const POST_COLUMNS = `posts.id, posts.slug, posts.title, posts.content,
+  posts.reading_time_minutes, posts.published_at,
   posts.approved_at, posts.rejected_at,
   (SELECT COUNT(*)::int FROM post_likes WHERE post_likes.post_id = posts.id) AS likes_count,
   (SELECT COUNT(*)::int FROM comments
@@ -108,15 +114,60 @@ export async function findPostById(id: string): Promise<Post | null> {
   return rows[0] ?? null
 }
 
-export async function insertPost({ title, content }: NewPost): Promise<Post> {
+// Só posts publicados: rascunhos e reprovados não têm URL pública
+export async function findPublishedPostBySlug(slug: string): Promise<Post | null> {
   const { rows } = await pool.query<Post>(
-    `INSERT INTO posts (id, title, content)
-     VALUES ($1, $2, $3)
+    `SELECT ${POST_COLUMNS} FROM posts WHERE slug = $1 AND approved_at IS NOT NULL`,
+    [slug]
+  )
+
+  return rows[0] ?? null
+}
+
+// Slugs já usados que colidem com `base`: ele mesmo e as variações "base-N".
+// `excludeId` ignora o próprio post, para a edição não colidir consigo mesma.
+export async function findTakenSlugs(base: string, excludeId?: string): Promise<string[]> {
+  const { rows } = await pool.query<{ slug: string }>(
+    `SELECT slug FROM posts
+     WHERE (slug = $1 OR slug ~ ('^' || $2 || '-[0-9]+$'))
+       AND ($3::text IS NULL OR id <> $3)`,
+    [base, escapeRegex(base), excludeId ?? null]
+  )
+
+  return rows.map((row) => row.slug)
+}
+
+export async function insertPost({
+  title,
+  content,
+  slug,
+  reading_time_minutes
+}: NewPost): Promise<Post> {
+  const { rows } = await pool.query<Post>(
+    `INSERT INTO posts (id, title, content, slug, reading_time_minutes)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING ${POST_COLUMNS}`,
-    [nanoid(), title, content]
+    [nanoid(), title, content, slug, reading_time_minutes]
   )
 
   return rows[0]
+}
+
+// Só altera posts não aprovados; null quando o post não existe ou já foi aprovado.
+// A coluna search é gerada, então acompanha o novo título/conteúdo sozinha.
+export async function updateDraftById(
+  id: string,
+  { title, content, slug, reading_time_minutes }: DraftChanges
+): Promise<Post | null> {
+  const { rows } = await pool.query<Post>(
+    `UPDATE posts
+     SET title = $2, content = $3, slug = $4, reading_time_minutes = $5
+     WHERE id = $1 AND approved_at IS NULL
+     RETURNING ${POST_COLUMNS}`,
+    [id, title, content, slug, reading_time_minutes]
+  )
+
+  return rows[0] ?? null
 }
 
 export async function approvePostById(id: string): Promise<Post | null> {
@@ -141,6 +192,10 @@ export async function rejectPostById(id: string): Promise<Post | null> {
   )
 
   return rows[0] ?? null
+}
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 // Ranking de posts aprovados pelas curtidas recebidas nos últimos `days` dias.
