@@ -12,12 +12,16 @@ export type Comment = {
   content: string
   status: CommentStatus
   moderation_reason: string | null
+  moderation_categories: string[]
   created_at: string
 }
 
-export type NewComment = Pick<Comment, "post_id" | "author_name" | "content">
+// O veredito da moderação é opcional: sem ele, valem os defaults da tabela (pendente, sem motivo)
+export type NewComment = Pick<Comment, "post_id" | "author_name" | "content"> &
+  Partial<Pick<Comment, "status" | "moderation_reason" | "moderation_categories">>
 
-const COMMENT_COLUMNS = "id, post_id, author_name, content, status, moderation_reason, created_at"
+export const COMMENT_COLUMNS =
+  "id, post_id, author_name, content, status, moderation_reason, moderation_categories, created_at"
 
 export async function findApprovedCommentsByPost(postId: string): Promise<Comment[]> {
   const { rows } = await pool.query<Comment>(
@@ -43,13 +47,17 @@ export async function findCommentsByStatus(status: CommentStatus): Promise<Comme
 export async function insertComment({
   post_id,
   author_name,
-  content
+  content,
+  status = "pending",
+  moderation_reason = null,
+  moderation_categories = []
 }: NewComment): Promise<Comment> {
   const { rows } = await pool.query<Comment>(
-    `INSERT INTO comments (id, post_id, author_name, content)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO comments
+       (id, post_id, author_name, content, status, moderation_reason, moderation_categories)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${COMMENT_COLUMNS}`,
-    [nanoid(), post_id, author_name, content]
+    [nanoid(), post_id, author_name, content, status, moderation_reason, moderation_categories]
   )
 
   return rows[0]
@@ -58,7 +66,7 @@ export async function insertComment({
 export async function approveCommentById(id: string): Promise<Comment | null> {
   const { rows } = await pool.query<Comment>(
     `UPDATE comments
-     SET status = 'approved', moderation_reason = NULL
+     SET status = 'approved', moderation_reason = NULL, moderation_categories = '{}'
      WHERE id = $1
      RETURNING ${COMMENT_COLUMNS}`,
     [id]
