@@ -26,6 +26,13 @@ const listCommentsQuerySchema = z.object({
   status: z.enum(COMMENT_STATUSES).default("pending")
 })
 
+// A mensagem do 201 conta ao leitor o que o moderador decidiu
+const CREATED_MESSAGES: Record<CommentStatus, string> = {
+  approved: "Comment published",
+  rejected: "Comment rejected",
+  pending: "Comment awaiting moderation"
+}
+
 // Padrão: 5 comentários por minuto por IP
 const DEFAULT_COMMENTS_RATE_LIMIT: RateLimitOptions = { max: 5, windowMs: 60_000 }
 
@@ -50,7 +57,8 @@ export function registerCommentRoutes(app: App, options: CommentRoutesOptions = 
   })
 
   app.post("/posts/:id/comments", async (req, res) => {
-    // Antes da validação: requisição inválida também consome a cota
+    // Antes da validação: requisição inválida também consome a cota.
+    // É o limitador que protege os tokens gastos pelo moderador IA.
     if (!limiter.check(req, res)) return
 
     const parsed = createCommentBodySchema.safeParse(req.body)
@@ -63,7 +71,7 @@ export function registerCommentRoutes(app: App, options: CommentRoutesOptions = 
         return res.status(404).send({ message: "Post not found" })
       }
 
-      return res.status(201).send({ message: "Comment awaiting moderation", data: comment })
+      return res.status(201).send({ message: CREATED_MESSAGES[comment.status], data: comment })
     } catch (error) {
       console.error("Falha ao criar o comentário:", error)
       return res.status(500).send({ message: "Failed to create comment" })
