@@ -8,22 +8,32 @@ import {
   createPostDraft,
   DEFAULT_PAGE_LIMIT,
   getPost,
+  getPublishedPostBySlug,
   listPosts,
   MAX_PAGE_LIMIT,
-  rejectPost
+  rejectPost,
+  updatePostDraft
 } from "../services/posts.ts"
 
 const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
 })
 
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+const updatePostBodySchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  content: z.string().trim().min(1)
+})
+
+const postSlugSchema = z
+  .string()
+  .max(100)
+  .regex(SLUG_PATTERN, "Must be a post slug (e.g. 'testes-com-node')")
+
 // O filtro usa o slug (ex.: "node-js"), o mesmo que aparece em post.tags[].slug
 const listPostsQuerySchema = z.object({
-  tag: z
-    .string()
-    .max(50)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Must be a tag slug (e.g. 'node-js')")
-    .optional(),
+  tag: z.string().max(50).regex(SLUG_PATTERN, "Must be a tag slug (e.g. 'node-js')").optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
   // "q=" ou só espaços contam como busca ausente
@@ -75,6 +85,49 @@ export function registerPostRoutes(app: App) {
     } catch (error) {
       console.error("Falha ao buscar o post:", error)
       return res.status(500).send({ message: "Failed to get post" })
+    }
+  })
+
+  // Rota pública de leitura: só posts publicados
+  app.get("/posts/slug/:slug", async (req, res) => {
+    const slug = postSlugSchema.safeParse(req.params.slug)
+    if (!slug.success) return sendValidationError(res, slug.error, "Invalid slug")
+
+    try {
+      const post = await getPublishedPostBySlug(slug.data)
+
+      if (!post) {
+        return res.status(404).send({ message: "Post not found" })
+      }
+
+      return res.send({ data: post })
+    } catch (error) {
+      console.error("Falha ao buscar o post pelo slug:", error)
+      return res.status(500).send({ message: "Failed to get post" })
+    }
+  })
+
+  app.put("/posts/:id", async (req, res) => {
+    if (!requireApiKey(req, res)) return
+
+    const parsed = updatePostBodySchema.safeParse(req.body)
+    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
+
+    try {
+      const result = await updatePostDraft(req.params.id, parsed.data)
+
+      if (result.status === "not_found") {
+        return res.status(404).send({ message: "Post not found" })
+      }
+
+      if (result.status === "approved") {
+        return res.status(409).send({ message: "Approved posts cannot be edited" })
+      }
+
+      return res.send({ message: "Post updated", data: result.post })
+    } catch (error) {
+      console.error("Falha ao editar o post:", error)
+      return res.status(500).send({ message: "Failed to update post" })
     }
   })
 
