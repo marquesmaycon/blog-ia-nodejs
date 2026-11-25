@@ -41,6 +41,12 @@ function buildServer() {
   return app.server
 }
 
+function buildLimitedServer() {
+  const app = createApp()
+  registerCommentRoutes(app, { rateLimit: { max: 1, windowMs: 60_000 } })
+  return app.server
+}
+
 const failing = async () => {
   throw new Error("db down")
 }
@@ -293,6 +299,39 @@ describe("rotas de comentários", () => {
 
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Failed to delete comment" })
+    })
+  })
+
+  describe("POST /posts/:id/comments: rate limit", () => {
+    it("responde 429 ao estourar a cota, sem chamar o service", async () => {
+      const server = buildLimitedServer()
+      const body = { author_name: "Ana", content: "Muito bom!" }
+
+      await request(server).post("/posts/post-1/comments").send(body).expect(201)
+      const res = await request(server).post("/posts/post-1/comments").send(body)
+
+      assert.equal(res.status, 429)
+      assert.deepEqual(res.body, { message: "Too Many Requests" })
+      assert.ok(res.headers["retry-after"])
+      assert.equal(services.createComment.mock.callCount(), 1)
+    })
+
+    it("conta requisições inválidas na cota", async () => {
+      const server = buildLimitedServer()
+
+      await request(server).post("/posts/post-1/comments").send({}).expect(400)
+      await request(server)
+        .post("/posts/post-1/comments")
+        .send({ author_name: "Ana", content: "Muito bom!" })
+        .expect(429)
+
+      assert.equal(services.createComment.mock.callCount(), 0)
+    })
+
+    it("não limita as rotas de leitura", async () => {
+      const server = buildLimitedServer()
+
+      for (let i = 0; i < 3; i++) await request(server).get("/posts/post-1/comments").expect(200)
     })
   })
 })

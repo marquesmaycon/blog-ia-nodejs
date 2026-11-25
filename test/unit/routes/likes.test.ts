@@ -52,6 +52,12 @@ function buildServer() {
   return app.server
 }
 
+function buildLimitedServer() {
+  const app = createApp()
+  registerLikeRoutes(app, { rateLimit: { max: 2, windowMs: 60_000 } })
+  return app.server
+}
+
 const failing = async () => {
   throw new Error("db down")
 }
@@ -208,6 +214,31 @@ describe("rotas de curtidas", () => {
 
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Failed to list popular posts" })
+    })
+  })
+
+  describe("/posts/:id/likes: rate limit", () => {
+    it("POST e DELETE dividem a cota e respondem 429 sem chamar o service", async () => {
+      const server = buildLimitedServer()
+
+      await request(server).post("/posts/post-1/likes").set(visitor).expect(201)
+      await request(server).delete("/posts/post-1/likes").set(visitor).expect(200)
+
+      for (const method of ["post", "delete"] as const) {
+        const res = await request(server)[method]("/posts/post-1/likes").set(visitor)
+
+        assert.equal(res.status, 429)
+        assert.deepEqual(res.body, { message: "Too Many Requests" })
+      }
+
+      assert.equal(services.likePost.mock.callCount(), 1)
+      assert.equal(services.unlikePost.mock.callCount(), 1)
+    })
+
+    it("não limita GET /posts/popular", async () => {
+      const server = buildLimitedServer()
+
+      for (let i = 0; i < 3; i++) await request(server).get("/posts/popular").expect(200)
     })
   })
 })
