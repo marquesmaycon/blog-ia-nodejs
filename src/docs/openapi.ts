@@ -13,6 +13,16 @@ const validationErrorResponse = (description: string) => ({
 
 const forbiddenResponse = errorResponse("API key ausente ou inválida")
 
+const tooManyRequestsResponse = (description: string) => ({
+  ...errorResponse(description),
+  headers: {
+    "Retry-After": {
+      description: "Segundos até a cota do IP ser renovada",
+      schema: { type: "integer", example: 42 }
+    }
+  }
+})
+
 const postResponse = (description: string, withMessage = false) => ({
   description,
   content: {
@@ -372,7 +382,7 @@ export const openApiSpec = {
         tags: ["Comments"],
         summary: "Comenta um post",
         description:
-          "Só aceita comentários em posts aprovados. O comentário nasce com status `pending` e só aparece publicamente depois de aprovado.",
+          "Só aceita comentários em posts aprovados. O comentário nasce com status `pending` e só aparece publicamente depois de aprovado. Limite de 5 requisições por minuto por IP.",
         parameters: [idParam],
         requestBody: {
           required: true,
@@ -400,6 +410,7 @@ export const openApiSpec = {
             "Campos ausentes, vazios ou longos demais, ou JSON inválido"
           ),
           "404": errorResponse("Post não encontrado ou não aprovado"),
+          "429": tooManyRequestsResponse("Mais de 5 comentários por minuto vindos do mesmo IP"),
           "500": errorResponse("Falha ao criar o comentário")
         }
       }
@@ -409,13 +420,14 @@ export const openApiSpec = {
         tags: ["Likes"],
         summary: "Curte um post",
         description:
-          "Idempotente: cada visitante curte um post uma única vez. Só funciona para posts aprovados.",
+          "Idempotente: cada visitante curte um post uma única vez. Só funciona para posts aprovados. Divide com o DELETE um limite de 30 requisições por minuto por IP.",
         parameters: [idParam, visitorIdHeader],
         responses: {
           "201": likeStatusResponse("Curtida registrada"),
           "200": likeStatusResponse("O visitante já tinha curtido o post"),
           "400": validationErrorResponse("`X-Visitor-Id` ausente ou inválido"),
           "404": errorResponse("Post não encontrado ou não aprovado"),
+          "429": tooManyRequestsResponse("Mais de 30 curtidas/descurtidas por minuto do mesmo IP"),
           "500": errorResponse("Falha ao curtir o post")
         }
       },
@@ -423,12 +435,13 @@ export const openApiSpec = {
         tags: ["Likes"],
         summary: "Remove a curtida de um post",
         description:
-          "Idempotente: responde 200 mesmo que o visitante não tivesse curtido. Só funciona para posts aprovados.",
+          "Idempotente: responde 200 mesmo que o visitante não tivesse curtido. Só funciona para posts aprovados. Divide com o POST um limite de 30 requisições por minuto por IP.",
         parameters: [idParam, visitorIdHeader],
         responses: {
           "200": likeStatusResponse("Curtida removida"),
           "400": validationErrorResponse("`X-Visitor-Id` ausente ou inválido"),
           "404": errorResponse("Post não encontrado ou não aprovado"),
+          "429": tooManyRequestsResponse("Mais de 30 curtidas/descurtidas por minuto do mesmo IP"),
           "500": errorResponse("Falha ao remover a curtida")
         }
       }

@@ -69,17 +69,18 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 
 ### Variáveis de ambiente
 
-| Variável            | Descrição                                               | Padrão                                            |
-| ------------------- | ------------------------------------------------------- | ------------------------------------------------- |
-| `API_HOST`          | Host em que o servidor escuta                           | `localhost` (no Docker: `0.0.0.0`)                |
-| `API_PORT`          | Porta do servidor                                       | `8080`                                            |
-| `API_PROTOCOL`      | Usado apenas no log de inicialização                    | `http`                                            |
-| `API_KEY`           | Bearer token das rotas administrativas (ver Endpoints)  | vazio, ou seja, o acesso protegido fica bloqueado |
-| `SITE_URL`          | URL pública do blog, usada nos links do RSS             | `API_PROTOCOL://API_HOST:API_PORT`                |
-| `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra | `google/gemini-2.5-flash`                         |
-| `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)          | —                                                 |
-| `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`               | —                                                 |
-| `DATABASE_URL`      | Connection string do Postgres                           | `postgres://blog:blog@localhost:5432/blog`        |
+| Variável            | Descrição                                                  | Padrão                                            |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------- |
+| `API_HOST`          | Host em que o servidor escuta                              | `localhost` (no Docker: `0.0.0.0`)                |
+| `API_PORT`          | Porta do servidor                                          | `8080`                                            |
+| `API_PROTOCOL`      | Usado apenas no log de inicialização                       | `http`                                            |
+| `API_KEY`           | Bearer token das rotas administrativas (ver Endpoints)     | vazio, ou seja, o acesso protegido fica bloqueado |
+| `SITE_URL`          | URL pública do blog, usada nos links do RSS                | `API_PROTOCOL://API_HOST:API_PORT`                |
+| `TRUST_PROXY`       | `true` para o rate limiting usar o IP do `X-Forwarded-For` | `false`, ou seja, usa o IP da conexão             |
+| `POST_WRITER_MODEL` | Modelo do agente no formato `provedor/modelo` do Mastra    | `google/gemini-2.5-flash`                         |
+| `GOOGLE_API_KEY`    | Chave do Google AI Studio (modelos `google/*`)             | —                                                 |
+| `GROQ_API_KEY`      | Chave da Groq, se usar um modelo `groq/*`                  | —                                                 |
+| `DATABASE_URL`      | Connection string do Postgres                              | `postgres://blog:blog@localhost:5432/blog`        |
 
 ### Scripts
 
@@ -119,6 +120,8 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 ```
 
 As rotas administrativas (`POST /posts/draft`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+
+As rotas públicas de escrita têm rate limiting em memória, por IP: `POST /posts/:id/comments` aceita 5 requisições por minuto, e `POST`/`DELETE /posts/:id/likes` dividem uma cota de 30 por minuto. As respostas trazem os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Ao estourar a cota, a rota responde `429 { message: "Too Many Requests" }` com `Retry-After` (em segundos). Atrás de um proxy reverso, defina `TRUST_PROXY=true` para que o IP venha do `X-Forwarded-For`; sem isso, o header é ignorado, porque o cliente poderia forjá-lo. Como os contadores ficam na memória, cada instância da API tem os seus, e um restart zera todos.
 
 A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
 
@@ -302,6 +305,7 @@ curl -X POST http://localhost:8080/posts/<id>/comments   -H "Content-Type: appli
 | `201`  | `{ message: "Comment awaiting moderation", data: Comment }` |
 | `400`  | Campos ausentes, vazios ou longos demais, ou JSON inválido  |
 | `404`  | Post não encontrado ou não aprovado                         |
+| `429`  | Mais de 5 comentários por minuto vindos do mesmo IP         |
 
 ### `GET /posts/:id/comments`
 
@@ -362,6 +366,7 @@ curl -X POST http://localhost:8080/posts/<id>/likes   -H "X-Visitor-Id: V1StGXR8
 | `200`  | O visitante já tinha curtido: `{ message: "Post already liked", data: { ... } }` |
 | `400`  | `X-Visitor-Id` ausente ou inválido                                               |
 | `404`  | Post não encontrado ou não aprovado                                              |
+| `429`  | Mais de 30 curtidas/descurtidas por minuto vindas do mesmo IP                    |
 
 ### `DELETE /posts/:id/likes`
 
@@ -372,6 +377,7 @@ Remove a curtida do visitante. É idempotente: responde `200` mesmo que não hou
 | `200`  | `{ message: "Like removed", data: { post_id, liked: false, likes_count } }` |
 | `400`  | `X-Visitor-Id` ausente ou inválido                                          |
 | `404`  | Post não encontrado ou não aprovado                                         |
+| `429`  | Mais de 30 curtidas/descurtidas por minuto vindas do mesmo IP               |
 
 ### `GET /posts/popular`
 
