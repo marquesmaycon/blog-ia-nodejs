@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import type { App } from "../http/app.ts"
 import { requireApiKey } from "../http/auth.ts"
+import { createRateLimiter, type RateLimitOptions } from "../http/rate-limit.ts"
 import { sendValidationError } from "../http/validation.ts"
 import type { CommentStatus } from "../repositories/comments.ts"
 import {
@@ -25,7 +26,14 @@ const listCommentsQuerySchema = z.object({
   status: z.enum(COMMENT_STATUSES).default("pending")
 })
 
-export function registerCommentRoutes(app: App) {
+// Padrão: 5 comentários por minuto por IP
+const DEFAULT_COMMENTS_RATE_LIMIT: RateLimitOptions = { max: 5, windowMs: 60_000 }
+
+export type CommentRoutesOptions = { rateLimit?: RateLimitOptions }
+
+export function registerCommentRoutes(app: App, options: CommentRoutesOptions = {}) {
+  const limiter = createRateLimiter(options.rateLimit ?? DEFAULT_COMMENTS_RATE_LIMIT)
+
   app.get("/posts/:id/comments", async (req, res) => {
     try {
       const comments = await listPostComments(req.params.id)
@@ -42,6 +50,9 @@ export function registerCommentRoutes(app: App) {
   })
 
   app.post("/posts/:id/comments", async (req, res) => {
+    // Antes da validação: requisição inválida também consome a cota
+    if (!limiter.check(req, res)) return
+
     const parsed = createCommentBodySchema.safeParse(req.body)
     if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
 
