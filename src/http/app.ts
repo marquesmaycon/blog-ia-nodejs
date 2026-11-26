@@ -47,6 +47,8 @@ type Segment = { type: "static"; value: string } | { type: "param"; name: string
 
 type Route = {
   method: HttpMethod
+  // Como foi registrado (ex.: "/posts/:id"); usado para listar as rotas
+  path: string
   segments: Segment[]
   handler: Handler<any>
   onError?: RouteErrorOptions
@@ -156,6 +158,8 @@ function createReply(raw: ServerResponse): Reply {
   return reply
 }
 
+export type RegisteredRoute = { method: HttpMethod; path: string }
+
 export function createApp() {
   const routes: Route[] = []
 
@@ -165,7 +169,7 @@ export function createApp() {
     handler: Handler<ExtractParams<Path>>,
     options: RouteOptions = {}
   ) {
-    routes.push({ method, segments: compilePath(path), handler, onError: options.onError })
+    routes.push({ method, path, segments: compilePath(path), handler, onError: options.onError })
     routes.sort(compareSpecificity)
   }
 
@@ -231,6 +235,8 @@ export function createApp() {
 
   return {
     server,
+    // Rotas registradas, na ordem de prioridade do roteador (ex.: para conferir a spec OpenAPI)
+    routes: (): RegisteredRoute[] => routes.map(({ method, path }) => ({ method, path })),
     get: <Path extends string>(
       path: Path,
       handler: Handler<ExtractParams<Path>>,
