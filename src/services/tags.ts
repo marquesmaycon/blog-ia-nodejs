@@ -8,7 +8,7 @@ import {
 import { slugify } from "../utils/slugify.ts"
 
 // Nomes que geram o mesmo slug viram uma tag só; o primeiro nome da lista vence
-function toUniqueTags(names: string[]): PostTag[] {
+export function toUniqueTags(names: string[]): PostTag[] {
   const bySlug = new Map<string, PostTag>()
 
   for (const name of names) {

@@ -12,8 +12,10 @@ import {
   type Post,
   type PostFilters
 } from "../repositories/posts.ts"
+import { findAllTagNames } from "../repositories/tags.ts"
 import { readingTimeMinutes } from "../utils/reading-time.ts"
 import { slugify } from "../utils/slugify.ts"
+import { toUniqueTags } from "./tags.ts"
 
 const MAX_SLUG_LENGTH = 80
 // Inserts simultâneos podem escolher o mesmo slug; o UNIQUE barra e tentamos de novo
@@ -55,7 +57,9 @@ export async function listPosts({
   return { data: posts, meta: { page, limit, total } }
 }
 
-export type PostContent = Pick<Post, "title" | "content">
+// summary e meta_description são opcionais na edição: ausentes, mantêm o valor atual
+export type PostContent = Pick<Post, "title" | "content"> &
+  Partial<Pick<Post, "summary" | "meta_description">>
 
 // O rascunho recém-criado com a última revisão da IA (null se o revisor falhou)
 export type PostDraft = Post & { review: PostReview | null }
@@ -116,10 +120,12 @@ export async function getPublishedPostBySlug(slug: string): Promise<Post | null>
   return findPublishedPostBySlug(slug)
 }
 
-// Roda o workflow escrever → revisar → (reescrever) e grava o rascunho com as revisões
+// Roda o workflow escrever → revisar → (reescrever) → SEO e grava o rascunho com as
+// revisões e as tags sugeridas. Sem SEO (o agente falhou), o slug vem do título e não há tags.
 export async function createPostDraft(idea: string): Promise<PostDraft> {
+  const existingTags = await findAllTagNames()
   const run = await mastra.getWorkflow(POST_DRAFTING_WORKFLOW_ID).createRun()
-  const result = await run.start({ inputData: { idea } })
+  const result = await run.start({ inputData: { idea, existingTags } })
 
   if (result.status !== "success") {
     throw new Error(`Workflow ${POST_DRAFTING_WORKFLOW_ID} terminou com status ${result.status}`, {
@@ -127,11 +133,19 @@ export async function createPostDraft(idea: string): Promise<PostDraft> {
     })
   }
 
-  const { title, content, reviews } = result.result
-  const reading_time_minutes = readingTimeMinutes(content)
+  const { title, content, reviews, seo } = result.result
+  const newPost = {
+    title,
+    content,
+    reading_time_minutes: readingTimeMinutes(content),
+    summary: seo?.summary ?? null,
+    meta_description: seo?.meta_description ?? null
+  }
+  const tags = toUniqueTags(seo?.tags ?? [])
 
-  const saved = await withUniqueSlug(title, undefined, (slug) =>
-    insertPostWithReviews({ title, content, slug, reading_time_minutes }, reviews)
+  // O slug da IA passa pelo mesmo slugify e pela checagem de colisão que o título passaria
+  const saved = await withUniqueSlug(seo?.slug || title, undefined, (slug) =>
+    insertPostWithReviews({ ...newPost, slug }, reviews, tags)
   )
 
   return { ...saved.post, review: saved.reviews.at(-1) ?? null }
@@ -141,7 +155,7 @@ export async function createPostDraft(idea: string): Promise<PostDraft> {
 // o slug é regerado quando o título muda.
 export async function updatePostDraft(
   id: string,
-  { title, content }: PostContent
+  { title, content, summary, meta_description }: PostContent
 ): Promise<UpdatePostDraftResult> {
   const current = await findPostById(id)
 
@@ -149,7 +163,13 @@ export async function updatePostDraft(
   if (current.approved_at !== null) return { status: "approved" }
 
   const reading_time_minutes = readingTimeMinutes(content)
-  const changes = { title, content, reading_time_minutes }
+  const changes = {
+    title,
+    content,
+    reading_time_minutes,
+    summary: summary === undefined ? current.summary : summary,
+    meta_description: meta_description === undefined ? current.meta_description : meta_description
+  }
 
   const post =
     title === current.title

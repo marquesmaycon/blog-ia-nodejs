@@ -15,6 +15,7 @@ import {
   rejectPost,
   updatePostDraft
 } from "../services/posts.ts"
+import { META_DESCRIPTION_MAX_LENGTH, SUMMARY_MAX_LENGTH } from "../utils/seo.ts"
 
 const createPostDraftBodySchema = z.object({
   idea: z.string().trim().min(1)
@@ -22,9 +23,21 @@ const createPostDraftBodySchema = z.object({
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+// Texto vazio (ou só espaços) limpa o campo, como enviar null; ausente mantém o atual
+const optionalSeoText = (maxLength: number) =>
+  z
+    .string()
+    .trim()
+    .max(maxLength)
+    .transform((value) => value || null)
+    .nullable()
+    .optional()
+
 const updatePostBodySchema = z.object({
   title: z.string().trim().min(1).max(200),
-  content: z.string().trim().min(1)
+  content: z.string().trim().min(1),
+  summary: optionalSeoText(SUMMARY_MAX_LENGTH),
+  meta_description: optionalSeoText(META_DESCRIPTION_MAX_LENGTH)
 })
 
 const postSlugSchema = z

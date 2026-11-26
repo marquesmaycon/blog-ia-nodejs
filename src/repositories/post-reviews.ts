@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid"
 
 import { pool, withTransaction, type Queryable } from "../db/index.ts"
-import { insertPost, type NewPost, type Post } from "./posts.ts"
+import { findPostById, insertPost, type NewPost, type Post, type PostTag } from "./posts.ts"
+import { replacePostTags } from "./tags.ts"
 
 export type PostReview = {
   id: string
@@ -43,15 +44,25 @@ export async function insertPostReviews(
   return rows.toSorted((a, b) => a.attempt - b.attempt)
 }
 
-// O rascunho e as revisões que ele recebeu entram juntos ou nenhum entra.
+// O rascunho, as revisões que ele recebeu e as tags sugeridas entram juntos ou nenhum entra.
 // Erros (ex.: colisão no UNIQUE do slug) desfazem a transação e são relançados.
+// As tags precisam chegar sem slugs repetidos (ver replacePostTags).
 export async function insertPostWithReviews(
   newPost: NewPost,
-  reviews: NewPostReview[]
+  reviews: NewPostReview[],
+  tags: PostTag[] = []
 ): Promise<{ post: Post; reviews: PostReview[] }> {
   return withTransaction(async (client) => {
-    const post = await insertPost(newPost, client)
-    return { post, reviews: await insertPostReviews(client, post.id, reviews) }
+    const inserted = await insertPost(newPost, client)
+    const savedReviews = await insertPostReviews(client, inserted.id, reviews)
+
+    if (tags.length === 0) return { post: inserted, reviews: savedReviews }
+
+    // O RETURNING do insert veio antes das tags: relê o post para devolvê-lo com elas
+    await replacePostTags(inserted.id, tags, client)
+    const post = (await findPostById(inserted.id, client)) ?? inserted
+
+    return { post, reviews: savedReviews }
   })
 }
 

@@ -3,7 +3,7 @@ import { findPosts, type Post } from "../repositories/posts.ts"
 export const FEED_SIZE = 20
 const DESCRIPTION_LENGTH = 280
 
-export type FeedPost = Pick<Post, "slug" | "title" | "content" | "published_at">
+export type FeedPost = Pick<Post, "slug" | "title" | "content" | "summary" | "published_at">
 
 const XML_ENTITIES: Record<string, string> = {
   "&": "&amp;",
@@ -17,8 +17,8 @@ export function escapeXml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => XML_ENTITIES[char])
 }
 
-// Texto corrido para a <description>: tira a marcação Markdown mais comum e corta no limite.
-// Quando o agente de SEO existir, o summary dele substitui este trecho.
+// Texto corrido para a <description> dos posts sem summary (antigos ou com falha no SEO):
+// tira a marcação Markdown mais comum e corta no limite.
 export function excerpt(markdown: string, maxLength = DESCRIPTION_LENGTH): string {
   const text = markdown
     .replace(/```[\s\S]*?```/g, " ")
@@ -49,7 +49,7 @@ export function buildRssFeed(posts: FeedPost[], baseUrl: string): string {
       <link>${link}</link>
       <guid isPermaLink="true">${link}</guid>
       <pubDate>${new Date(post.published_at).toUTCString()}</pubDate>
-      <description>${escapeXml(excerpt(post.content))}</description>
+      <description>${escapeXml(post.summary ?? excerpt(post.content))}</description>
     </item>`
   })
 
