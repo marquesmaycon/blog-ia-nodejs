@@ -13,6 +13,9 @@ export type Post = {
   slug: string
   title: string
   content: string
+  // Gerados pelo agente post-seo; null nos posts antigos e quando o agente falha
+  summary: string | null
+  meta_description: string | null
   reading_time_minutes: number
   published_at: string
   approved_at: string | null
@@ -46,7 +49,10 @@ export type PostsPage = {
   total: number
 }
 
-export type NewPost = Pick<Post, "title" | "content" | "slug" | "reading_time_minutes">
+export type NewPost = Pick<
+  Post,
+  "title" | "content" | "slug" | "reading_time_minutes" | "summary" | "meta_description"
+>
 
 export type DraftChanges = NewPost
 
@@ -58,7 +64,7 @@ export type PopularPost = Post & {
 // Colunas qualificadas para não colidir em JOINs. As subqueries correlacionadas também
 // funcionam no RETURNING; o ::int evita que o pg devolva o COUNT (bigint) como string.
 export const POST_COLUMNS = `posts.id, posts.slug, posts.title, posts.content,
-  posts.reading_time_minutes, posts.published_at,
+  posts.summary, posts.meta_description, posts.reading_time_minutes, posts.published_at,
   posts.approved_at, posts.rejected_at,
   (SELECT COUNT(*)::int FROM post_likes WHERE post_likes.post_id = posts.id) AS likes_count,
   (SELECT COUNT(*)::int FROM comments
@@ -108,8 +114,9 @@ export async function findPosts(
   return { posts: page.rows, total: count.rows[0].total }
 }
 
-export async function findPostById(id: string): Promise<Post | null> {
-  const { rows } = await pool.query<Post>(`SELECT ${POST_COLUMNS} FROM posts WHERE id = $1`, [id])
+// `client` permite reler o post dentro de uma transação (ex.: depois de gravar as tags)
+export async function findPostById(id: string, client: Queryable = pool): Promise<Post | null> {
+  const { rows } = await client.query<Post>(`SELECT ${POST_COLUMNS} FROM posts WHERE id = $1`, [id])
 
   return rows[0] ?? null
 }
@@ -139,14 +146,14 @@ export async function findTakenSlugs(base: string, excludeId?: string): Promise<
 
 // `client` permite gravar dentro de uma transação (ex.: junto com os reviews do rascunho)
 export async function insertPost(
-  { title, content, slug, reading_time_minutes }: NewPost,
+  { title, content, slug, reading_time_minutes, summary, meta_description }: NewPost,
   client: Queryable = pool
 ): Promise<Post> {
   const { rows } = await client.query<Post>(
-    `INSERT INTO posts (id, title, content, slug, reading_time_minutes)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO posts (id, title, content, slug, reading_time_minutes, summary, meta_description)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${POST_COLUMNS}`,
-    [nanoid(), title, content, slug, reading_time_minutes]
+    [nanoid(), title, content, slug, reading_time_minutes, summary, meta_description]
   )
 
   return rows[0]
@@ -156,14 +163,15 @@ export async function insertPost(
 // A coluna search é gerada, então acompanha o novo título/conteúdo sozinha.
 export async function updateDraftById(
   id: string,
-  { title, content, slug, reading_time_minutes }: DraftChanges
+  { title, content, slug, reading_time_minutes, summary, meta_description }: DraftChanges
 ): Promise<Post | null> {
   const { rows } = await pool.query<Post>(
     `UPDATE posts
-     SET title = $2, content = $3, slug = $4, reading_time_minutes = $5
+     SET title = $2, content = $3, slug = $4, reading_time_minutes = $5,
+       summary = $6, meta_description = $7
      WHERE id = $1 AND approved_at IS NULL
      RETURNING ${POST_COLUMNS}`,
-    [id, title, content, slug, reading_time_minutes]
+    [id, title, content, slug, reading_time_minutes, summary, meta_description]
   )
 
   return rows[0] ?? null
