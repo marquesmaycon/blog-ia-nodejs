@@ -1,9 +1,13 @@
 // Escreve o post e o submete ao revisor; abaixo da nota mínima, reescreve com o feedback.
+// No fim, o agente de SEO gera resumo, meta description, slug e tags da versão final.
 // O workflow só gera: quem persiste o rascunho e os reviews é o service (createPostDraft).
 import { createStep, createWorkflow } from "@mastra/core/workflows"
 import { z } from "zod"
 
+import { META_DESCRIPTION_MAX_LENGTH, SUMMARY_MAX_LENGTH } from "../../utils/seo.ts"
+import { truncate } from "../../utils/truncate.ts"
 import { POST_REVIEWER_AGENT_ID } from "../agents/post-reviewer.ts"
+import { POST_SEO_AGENT_ID } from "../agents/post-seo.ts"
 import { POST_WRITER_AGENT_ID } from "../agents/post-writer.ts"
 
 export const POST_DRAFTING_WORKFLOW_ID = "post-drafting"
@@ -11,6 +15,9 @@ export const POST_DRAFTING_WORKFLOW_ID = "post-drafting"
 const DEFAULT_MAX_ATTEMPTS = 3
 const DEFAULT_MIN_SCORE = 7
 const DEFAULT_REVIEW_TIMEOUT_MS = 30_000
+const DEFAULT_SEO_TIMEOUT_MS = 20_000
+
+export const MAX_SEO_TAGS = 5
 
 export const draftSchema = z.object({
   title: z.string().min(1).describe("Título do post, curto e chamativo"),
@@ -23,6 +30,26 @@ export const reviewSchema = z.object({
   suggestions: z.array(z.string()).describe("Ações para corrigir os problemas")
 })
 
+// Sem .max(): um limite estourado pelo modelo não derruba a geração; o normalizeSeo corta
+export const seoSchema = z.object({
+  summary: z
+    .string()
+    .describe(`Resumo de uma ou duas frases, até ${SUMMARY_MAX_LENGTH} caracteres`),
+  meta_description: z
+    .string()
+    .describe(`Descrição para buscadores, até ${META_DESCRIPTION_MAX_LENGTH} caracteres`),
+  slug: z.string().describe("Slug curto em kebab-case, sem acentos"),
+  tags: z.array(z.string()).describe(`De 1 a ${MAX_SEO_TAGS} tags; prefira as existentes`)
+})
+
+// O SEO já normalizado: textos vazios viram null e os limites são garantidos
+const postSeoSchema = z.object({
+  summary: z.string().nullable(),
+  meta_description: z.string().nullable(),
+  slug: z.string(),
+  tags: z.array(z.string())
+})
+
 const draftReviewSchema = reviewSchema.extend({
   // Tentativa (1 = primeira versão) do rascunho avaliado
   attempt: z.number().int().min(1)
@@ -31,10 +58,14 @@ const draftReviewSchema = reviewSchema.extend({
 export type Draft = z.infer<typeof draftSchema>
 export type Review = z.infer<typeof reviewSchema>
 export type DraftReview = z.infer<typeof draftReviewSchema>
+export type Seo = z.infer<typeof seoSchema>
+export type PostSeo = z.infer<typeof postSeoSchema>
 
 // Dados que atravessam as iterações do loop: entrada e saída de cada step
 const iterationSchema = z.object({
   idea: z.string(),
+  // Vocabulário de tags do blog; só o step de SEO usa, mas precisa atravessar o loop
+  existingTags: z.array(z.string()),
   draft: draftSchema.nullable(),
   reviews: z.array(draftReviewSchema),
   attempt: z.number().int().min(0),
@@ -58,6 +89,10 @@ export function minScore(): number {
 
 function reviewTimeoutMs(): number {
   return positiveIntEnv("POST_REVIEW_TIMEOUT_MS", DEFAULT_REVIEW_TIMEOUT_MS)
+}
+
+function seoTimeoutMs(): number {
+  return positiveIntEnv("POST_SEO_TIMEOUT_MS", DEFAULT_SEO_TIMEOUT_MS)
 }
 
 // Sem review (o revisor falhou) não há feedback para reescrever: encerra com o que tem
@@ -89,6 +124,41 @@ export function buildReviewPrompt(idea: string, draft: Draft): string {
     `Ideia original: ${idea}`,
     `<rascunho>\nTítulo: ${draft.title}\n\n${draft.content}\n</rascunho>`
   ].join("\n\n")
+}
+
+export function buildSeoPrompt(draft: Draft, existingTags: string[]): string {
+  return [
+    `Tags existentes: ${existingTags.length ? existingTags.join(", ") : "(nenhuma)"}`,
+    `<rascunho>\nTítulo: ${draft.title}\n\n${draft.content}\n</rascunho>`
+  ].join("\n\n")
+}
+
+// Junta os espaços e corta no limite; texto vazio vira null
+function seoText(value: string, maxLength: number): string | null {
+  const trimmed = value.replace(/\s+/g, " ").trim()
+  return trimmed ? truncate(trimmed, maxLength) : null
+}
+
+// Garante os limites que o modelo pode não respeitar: corta os textos, troca vazios por null
+// e descarta tags vazias ou repetidas (ignorando caixa), ficando com as MAX_SEO_TAGS primeiras
+export function normalizeSeo(seo: Seo): PostSeo {
+  const seen = new Set<string>()
+  const tags = seo.tags
+    .map((tag) => tag.trim())
+    .filter((tag) => {
+      const key = tag.toLowerCase()
+      if (!tag || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, MAX_SEO_TAGS)
+
+  return {
+    summary: seoText(seo.summary, SUMMARY_MAX_LENGTH),
+    meta_description: seoText(seo.meta_description, META_DESCRIPTION_MAX_LENGTH),
+    slug: seo.slug.trim(),
+    tags
+  }
 }
 
 const writeDraftStep = createStep({
@@ -139,6 +209,38 @@ const reviewDraftStep = createStep({
   }
 })
 
+const draftingOutputSchema = draftSchema.extend({
+  reviews: z.array(draftReviewSchema),
+  // null quando o agente de SEO falhou: o service usa o título para o slug e não aplica tags
+  seo: postSeoSchema.nullable()
+})
+
+// Como no revisor, a falha do SEO não perde o rascunho: ele segue sem os metadados
+const generateSeoStep = createStep({
+  id: "generate-seo",
+  inputSchema: iterationSchema,
+  outputSchema: draftingOutputSchema,
+  execute: async ({ inputData, mastra }) => {
+    const { draft, reviews, existingTags } = inputData
+    if (!draft) throw new Error("Workflow terminou sem rascunho")
+
+    let seo: PostSeo | null = null
+
+    try {
+      const agent = mastra.getAgent(POST_SEO_AGENT_ID)
+      const { object } = await agent.generate(buildSeoPrompt(draft, existingTags), {
+        structuredOutput: { schema: seoSchema },
+        abortSignal: AbortSignal.timeout(seoTimeoutMs())
+      })
+      seo = normalizeSeo(object)
+    } catch (error) {
+      console.error("Falha ao gerar o SEO do rascunho; será salvo sem os metadados:", error)
+    }
+
+    return { ...draft, reviews, seo }
+  }
+})
+
 // Uma iteração do loop: escreve (ou reescreve) e revisa
 const draftIteration = createWorkflow({
   id: "post-drafting-iteration",
@@ -151,21 +253,19 @@ const draftIteration = createWorkflow({
 
 export const postDraftingWorkflow = createWorkflow({
   id: POST_DRAFTING_WORKFLOW_ID,
-  inputSchema: z.object({ idea: z.string().min(1) }),
-  outputSchema: draftSchema.extend({ reviews: z.array(draftReviewSchema) }),
+  inputSchema: z.object({ idea: z.string().min(1), existingTags: z.array(z.string()).optional() }),
+  outputSchema: draftingOutputSchema,
   // Execução síncrona e sem suspend/resume: não há o que retomar, então não guarda snapshots
   options: { shouldPersistSnapshot: () => false }
 })
   .map(async ({ inputData }): Promise<Iteration> => ({
     idea: inputData.idea,
+    existingTags: inputData.existingTags ?? [],
     draft: null,
     reviews: [],
     attempt: 0,
     done: false
   }))
   .dountil(draftIteration, async ({ inputData }) => inputData.done)
-  .map(async ({ inputData }) => {
-    if (!inputData.draft) throw new Error("Workflow terminou sem rascunho")
-    return { ...inputData.draft, reviews: inputData.reviews }
-  })
+  .then(generateSeoStep)
   .commit()
