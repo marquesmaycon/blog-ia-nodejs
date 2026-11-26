@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
+import type { PostReview } from "../../../src/repositories/post-reviews.ts"
 import type { Post } from "../../../src/repositories/posts.ts"
+import type { PostReviewSummary } from "../../../src/services/post-reviews.ts"
 import type {
   ListPostsOptions,
   PaginatedPosts,
   PostContent,
+  PostDraft,
   UpdatePostDraftResult
 } from "../../../src/services/posts.ts"
 
@@ -26,12 +29,20 @@ const services = {
   ),
   approvePost: mock.fn(async (_id: string): Promise<Post | null> => null),
   rejectPost: mock.fn(async (_id: string): Promise<Post | null> => null),
-  createPostDraft: mock.fn(async (_idea: string): Promise<Post> => post)
+  createPostDraft: mock.fn(async (_idea: string): Promise<PostDraft> => ({ ...post, review: null }))
+}
+
+const reviewServices = {
+  getPostReviews: mock.fn(async (_id: string): Promise<PostReviewSummary | null> => null)
 }
 
 // As constantes de paginação também saem do módulo mockado, então entram nos exports
 mock.module(import.meta.resolve("../../../src/services/posts.ts"), {
   exports: { ...services, DEFAULT_PAGE_LIMIT: 10, MAX_PAGE_LIMIT: 50 }
+})
+
+mock.module(import.meta.resolve("../../../src/services/post-reviews.ts"), {
+  exports: reviewServices
 })
 
 const { createApp } = await import("../../../src/http/app.ts")
@@ -64,7 +75,9 @@ describe("rotas /posts", () => {
 
   beforeEach(() => {
     process.env.API_KEY = "secret"
-    for (const fn of Object.values(services)) fn.mock.resetCalls()
+    for (const fn of [...Object.values(services), ...Object.values(reviewServices)]) {
+      fn.mock.resetCalls()
+    }
     // Silencia os console.error dos caminhos de erro
     mock.method(console, "error", () => {})
   })
@@ -220,6 +233,11 @@ describe("rotas /posts", () => {
         service: services.createPostDraft
       },
       {
+        name: "GET /posts/:id/review",
+        send: () => request(buildServer()).get("/posts/abc/review"),
+        service: reviewServices.getPostReviews
+      },
+      {
         name: "PUT /posts/:id",
         send: () => request(buildServer()).put("/posts/abc").send({ title: "T", content: "C" }),
         service: services.updatePostDraft
@@ -276,6 +294,47 @@ describe("rotas /posts", () => {
       const res = await request(buildServer()).get("/posts/abc")
 
       assert.equal(res.status, 500)
+    })
+  })
+
+  describe("GET /posts/:id/review", () => {
+    const postReview: PostReview = {
+      id: "r1",
+      post_id: "abc",
+      attempt: 1,
+      score: 8,
+      issues: [],
+      suggestions: [],
+      created_at: "2026-01-01T00:00:00.000Z"
+    }
+
+    it("retorna a última revisão e o histórico", async () => {
+      const summary = { latest: postReview, history: [postReview] }
+      reviewServices.getPostReviews.mock.mockImplementationOnce(async () => summary)
+
+      const res = await request(buildServer()).get("/posts/abc/review").set(auth)
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(res.body, { data: summary })
+      assert.deepEqual(reviewServices.getPostReviews.mock.calls[0].arguments, ["abc"])
+    })
+
+    it("responde 404 quando o post não existe", async () => {
+      const res = await request(buildServer()).get("/posts/missing/review").set(auth)
+
+      assert.equal(res.status, 404)
+      assert.deepEqual(res.body, { message: "Post not found" })
+    })
+
+    it("responde 500 quando o service falha", async () => {
+      reviewServices.getPostReviews.mock.mockImplementationOnce(async () => {
+        throw new Error("db down")
+      })
+
+      const res = await request(buildServer()).get("/posts/abc/review").set(auth)
+
+      assert.equal(res.status, 500)
+      assert.deepEqual(res.body, { message: "Failed to get post review" })
     })
   })
 
@@ -459,7 +518,7 @@ describe("rotas /posts", () => {
         .send({ idea: "  testes  " })
 
       assert.equal(res.status, 201)
-      assert.deepEqual(res.body, { message: "Post draft created", data: post })
+      assert.deepEqual(res.body, { message: "Post draft created", data: { ...post, review: null } })
       assert.deepEqual(services.createPostDraft.mock.calls[0].arguments, ["testes"])
     })
 

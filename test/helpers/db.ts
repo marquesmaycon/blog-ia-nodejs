@@ -1,11 +1,13 @@
 import { pool } from "../../src/db/index.ts"
 import { COMMENT_COLUMNS, type Comment } from "../../src/repositories/comments.ts"
+import { POST_REVIEW_COLUMNS, type PostReview } from "../../src/repositories/post-reviews.ts"
 import { POST_COLUMNS, type Post, type PostTag } from "../../src/repositories/posts.ts"
 import { slugify } from "../../src/utils/slugify.ts"
 
 export { pool }
 
-// CASCADE limpa junto as tabelas que referenciam posts (comments, post_likes, post_tags).
+// CASCADE limpa junto as tabelas que referenciam posts (comments, post_likes, post_tags,
+// post_reviews).
 // tags não referencia posts, então entra explicitamente.
 export async function truncatePosts() {
   await pool.query("TRUNCATE posts, tags CASCADE")
@@ -113,4 +115,35 @@ export async function seedTag({
 
 export async function seedPostTag({ post_id, tag_id }: { post_id: string; tag_id: string }) {
   await pool.query("INSERT INTO post_tags (post_id, tag_id) VALUES ($1, $2)", [post_id, tag_id])
+}
+
+export async function seedPostReview(
+  overrides: Partial<PostReview> & Pick<PostReview, "post_id">
+): Promise<PostReview> {
+  const review = {
+    id: `seed-${crypto.randomUUID()}`,
+    attempt: 1,
+    score: 8,
+    issues: [],
+    suggestions: [],
+    created_at: new Date().toISOString(),
+    ...overrides
+  }
+
+  const { rows } = await pool.query<PostReview>(
+    `INSERT INTO post_reviews (id, post_id, attempt, score, issues, suggestions, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING ${POST_REVIEW_COLUMNS}`,
+    [
+      review.id,
+      review.post_id,
+      review.attempt,
+      review.score,
+      review.issues,
+      review.suggestions,
+      review.created_at
+    ]
+  )
+
+  return rows[0]
 }

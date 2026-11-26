@@ -3,6 +3,8 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
+import type { DraftReview } from "../../../src/mastra/workflows/post-drafting.ts"
+import type { NewPostReview, PostReview } from "../../../src/repositories/post-reviews.ts"
 import type {
   DraftChanges,
   FindPostsFilters,
@@ -36,7 +38,6 @@ const repository = {
   findPostById: mock.fn(async (_id: string): Promise<Post | null> => post),
   findPublishedPostBySlug: mock.fn(async (_slug: string): Promise<Post | null> => post),
   findTakenSlugs: mock.fn(async (_base: string, _excludeId?: string): Promise<string[]> => []),
-  insertPost: mock.fn(async (data: NewPost): Promise<Post> => ({ ...post, ...data })),
   updateDraftById: mock.fn(async (_id: string, data: DraftChanges): Promise<Post | null> => ({
     ...post,
     ...data
@@ -45,17 +46,47 @@ const repository = {
   rejectPostById: mock.fn(async (_id: string): Promise<Post | null> => post)
 }
 
-const generate = mock.fn(async (_prompt: string, _options: unknown) => ({
-  object: { title: "Gerado", content: "## Corpo" }
-}))
-const getAgent = mock.fn((_id: string) => ({ generate }))
+const toSavedReview = (review: NewPostReview, postId: string): PostReview => ({
+  id: `review-${review.attempt}`,
+  post_id: postId,
+  created_at: "2026-01-01T00:00:00.000Z",
+  ...review
+})
+
+const reviewsRepository = {
+  insertPostWithReviews: mock.fn(async (data: NewPost, reviews: NewPostReview[]) => ({
+    post: { ...post, ...data },
+    reviews: reviews.map((review) => toSavedReview(review, post.id))
+  }))
+}
+
+const generatedReviews: DraftReview[] = [
+  { attempt: 1, score: 5, issues: ["raso"], suggestions: ["aprofunde"] },
+  { attempt: 2, score: 8, issues: [], suggestions: [] }
+]
+
+type WorkflowResult =
+  | { status: "success"; result: { title: string; content: string; reviews: DraftReview[] } }
+  | { status: "failed"; error: Error }
+
+const start = mock.fn(
+  async (_options: { inputData: { idea: string } }): Promise<WorkflowResult> => ({
+    status: "success",
+    result: { title: "Gerado", content: "## Corpo", reviews: generatedReviews }
+  })
+)
+const createRun = mock.fn(async () => ({ start }))
+const getWorkflow = mock.fn((_id: string) => ({ createRun }))
 
 mock.module(import.meta.resolve("../../../src/repositories/posts.ts"), { exports: repository })
-mock.module(import.meta.resolve("../../../src/mastra/index.ts"), {
-  exports: { mastra: { getAgent } }
+mock.module(import.meta.resolve("../../../src/repositories/post-reviews.ts"), {
+  exports: reviewsRepository
 })
-mock.module(import.meta.resolve("../../../src/mastra/agents/post-writer.ts"), {
-  exports: { POST_WRITER_AGENT_ID: "post-writer" }
+mock.module(import.meta.resolve("../../../src/mastra/index.ts"), {
+  exports: { mastra: { getWorkflow } }
+})
+mock.module(import.meta.resolve("../../../src/mastra/workflows/post-drafting.ts"), {
+  exports: { POST_DRAFTING_WORKFLOW_ID: "post-drafting" }
 })
 
 const {
@@ -69,6 +100,13 @@ const {
   updatePostDraft
 } = await import("../../../src/services/posts.ts")
 
+// Próxima execução do workflow devolve este texto e estas revisões
+const generated = (title: string, content: string, reviews: DraftReview[] = []) =>
+  start.mock.mockImplementationOnce(async () => ({
+    status: "success",
+    result: { title, content, reviews }
+  }))
+
 const slugConflict = () =>
   Object.assign(new Error("duplicate key"), { code: "23505", constraint: "posts_slug_key" })
 
@@ -76,7 +114,14 @@ const APPROVED_AT = "2026-01-02T00:00:00.000Z"
 
 describe("services/posts", () => {
   beforeEach(() => {
-    for (const fn of [...Object.values(repository), generate, getAgent]) fn.mock.resetCalls()
+    for (const fn of [
+      ...Object.values(repository),
+      ...Object.values(reviewsRepository),
+      start,
+      createRun,
+      getWorkflow
+    ])
+      fn.mock.resetCalls()
   })
 
   describe("listPosts", () => {
@@ -133,62 +178,90 @@ describe("services/posts", () => {
   })
 
   describe("createPostDraft", () => {
-    it("gera o post com o agente post-writer e persiste o resultado", async () => {
+    const insert = reviewsRepository.insertPostWithReviews
+
+    it("roda o workflow post-drafting com a ideia e grava o post com as revisões", async () => {
       const result = await createPostDraft("testes com node")
 
-      assert.deepEqual(getAgent.mock.calls[0].arguments, ["post-writer"])
+      assert.deepEqual(getWorkflow.mock.calls[0].arguments, ["post-drafting"])
+      assert.deepEqual(start.mock.calls[0].arguments, [{ inputData: { idea: "testes com node" } }])
 
-      const [prompt, options] = generate.mock.calls[0].arguments
-      assert.match(prompt, /testes com node/)
-      assert.ok((options as { structuredOutput?: { schema?: unknown } }).structuredOutput?.schema)
-
-      assert.deepEqual(repository.insertPost.mock.calls[0].arguments, [
-        { title: "Gerado", content: "## Corpo", slug: "gerado", reading_time_minutes: 1 }
+      assert.deepEqual(insert.mock.calls[0].arguments, [
+        { title: "Gerado", content: "## Corpo", slug: "gerado", reading_time_minutes: 1 },
+        generatedReviews
       ])
       assert.equal(result.title, "Gerado")
     })
 
+    it("devolve a última revisão junto com o post", async () => {
+      const result = await createPostDraft("ideia")
+
+      assert.equal(result.review?.attempt, 2)
+      assert.equal(result.review?.score, 8)
+    })
+
+    it("devolve review null quando o revisor não respondeu", async () => {
+      generated("Gerado", "## Corpo", [])
+
+      const result = await createPostDraft("ideia")
+
+      assert.equal(result.review, null)
+      assert.deepEqual(insert.mock.calls[0].arguments[1], [])
+    })
+
     it("calcula o tempo de leitura a partir do conteúdo gerado", async () => {
-      generate.mock.mockImplementationOnce(async () => ({
-        object: { title: "Longo", content: "palavra ".repeat(401) }
-      }))
+      generated("Longo", "palavra ".repeat(401))
 
       await createPostDraft("ideia")
 
-      assert.equal(repository.insertPost.mock.calls[0].arguments[0].reading_time_minutes, 3)
+      assert.equal(insert.mock.calls[0].arguments[0].reading_time_minutes, 3)
+    })
+
+    it("lança erro e não persiste nada quando o workflow falha", async () => {
+      const cause = new Error("LLM indisponível")
+      start.mock.mockImplementationOnce(async () => ({ status: "failed", error: cause }))
+
+      await assert.rejects(createPostDraft("ideia"), (error: Error) => {
+        assert.match(error.message, /post-drafting terminou com status failed/)
+        assert.equal(error.cause, cause)
+        return true
+      })
+      assert.equal(insert.mock.callCount(), 0)
     })
 
     it("gera outro slug e tenta de novo quando o insert colide no UNIQUE", async () => {
       repository.findTakenSlugs.mock.mockImplementationOnce(async () => [], 0)
       repository.findTakenSlugs.mock.mockImplementationOnce(async () => ["gerado"], 1)
-      repository.insertPost.mock.mockImplementationOnce(async () => {
+      insert.mock.mockImplementationOnce(async () => {
         throw slugConflict()
       })
 
       const result = await createPostDraft("ideia")
 
-      assert.equal(repository.insertPost.mock.callCount(), 2)
+      assert.equal(insert.mock.callCount(), 2)
       assert.equal(result.slug, "gerado-2")
+      // O workflow roda uma vez só: a nova tentativa reaproveita o texto gerado
+      assert.equal(start.mock.callCount(), 1)
     })
 
     it("desiste depois de 3 colisões seguidas", async () => {
       for (const call of [0, 1, 2]) {
-        repository.insertPost.mock.mockImplementationOnce(async () => {
+        insert.mock.mockImplementationOnce(async () => {
           throw slugConflict()
         }, call)
       }
 
       await assert.rejects(createPostDraft("ideia"), { code: "23505" })
-      assert.equal(repository.insertPost.mock.callCount(), 3)
+      assert.equal(insert.mock.callCount(), 3)
     })
 
     it("não tenta de novo em outros erros do banco", async () => {
-      repository.insertPost.mock.mockImplementationOnce(async () => {
+      insert.mock.mockImplementationOnce(async () => {
         throw Object.assign(new Error("fk"), { code: "23503" })
       })
 
       await assert.rejects(createPostDraft("ideia"), /fk/)
-      assert.equal(repository.insertPost.mock.callCount(), 1)
+      assert.equal(insert.mock.callCount(), 1)
     })
   })
 
@@ -311,15 +384,6 @@ describe("services/posts", () => {
       assert.deepEqual(await updatePostDraft("abc", { title: post.title, content: "C" }), {
         status: "not_found"
       })
-    })
-
-    it("não persiste nada quando a geração falha", async () => {
-      generate.mock.mockImplementationOnce(async () => {
-        throw new Error("LLM indisponível")
-      })
-
-      await assert.rejects(createPostDraft("ideia"), /LLM indisponível/)
-      assert.equal(repository.insertPost.mock.callCount(), 0)
     })
   })
 })

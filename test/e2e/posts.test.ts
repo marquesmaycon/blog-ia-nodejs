@@ -7,6 +7,7 @@ import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
 import request from "supertest"
 
 import { createApp } from "../../src/http/app.ts"
+import { POST_REVIEWER_AGENT_ID } from "../../src/mastra/agents/post-reviewer.ts"
 import { mastra } from "../../src/mastra/index.ts"
 import type { Post } from "../../src/repositories/posts.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
@@ -19,8 +20,16 @@ const app = createApp()
 registerPostRoutes(app)
 const api = () => request(app.server)
 
-function mockPostWriter(generate: () => Promise<unknown>) {
-  return mock.method(mastra, "getAgent", (() => ({ generate })) as never)
+// O revisor aprova de primeira por padrão, para cada rascunho custar uma escrita só
+const approvingReview = async () => ({ object: { score: 9, issues: [], suggestions: [] } })
+
+function mockPostWriter(
+  generate: () => Promise<unknown>,
+  review: () => Promise<unknown> = approvingReview
+) {
+  return mock.method(mastra, "getAgent", ((id: string) => ({
+    generate: id === POST_REVIEWER_AGENT_ID ? review : generate
+  })) as never)
 }
 
 function mockGeneratedPost(title: string, content = `## ${title}\n\nConteúdo.`) {
@@ -30,7 +39,9 @@ function mockGeneratedPost(title: string, content = `## ${title}\n\nConteúdo.`)
 async function createDraft(idea: string): Promise<Post> {
   mockGeneratedPost(`Post sobre ${idea}`)
   const res = await api().post("/posts/draft").set(auth).send({ idea }).expect(201)
-  return res.body.data
+  // A revisão só vem na resposta da criação; o resto da API devolve o Post puro
+  const { review: _review, ...post } = res.body.data
+  return post
 }
 
 describe("E2E /posts", () => {
@@ -47,8 +58,9 @@ describe("E2E /posts", () => {
       .send({ idea: "testes no node" })
       .expect(201)
 
-    const draft: Post = created.body.data
+    const { review, ...draft }: Post & { review: { score: number } } = created.body.data
     assert.equal(created.body.message, "Post draft created")
+    assert.equal(review.score, 9)
     assert.equal(draft.title, "Testes com node:test")
     assert.equal(draft.content, "## Intro\n\nTexto.")
     assert.equal(draft.approved_at, null)
