@@ -3,8 +3,6 @@ import { nanoid } from "nanoid"
 import { pool } from "../db/index.ts"
 import type { Comment, CommentStatus, NewComment } from "../domain/comments.ts"
 
-export type { Comment, CommentAuthorType, CommentStatus, NewComment } from "../domain/comments.ts"
-
 export const COMMENT_COLUMNS =
   "id, post_id, author_name, content, status, moderation_reason, moderation_categories, parent_id, author_type, created_at"
 

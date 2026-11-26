@@ -1,9 +1,10 @@
-import { findPostById, type Post, type PostTag } from "../repositories/posts.ts"
+import type { Post, PostTag } from "../domain/posts.ts"
+import type { TagWithCount } from "../domain/tags.ts"
+import { findPostById } from "../repositories/posts.ts"
 import {
   deleteTagBySlug,
   findTagsWithApprovedPosts,
-  replacePostTags,
-  type TagWithCount
+  replacePostTags
 } from "../repositories/tags.ts"
 import { slugify } from "../utils/slugify.ts"
 

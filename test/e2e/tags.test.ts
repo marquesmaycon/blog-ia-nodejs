@@ -4,8 +4,8 @@ import { after, before, beforeEach, describe, it } from "node:test"
 
 import request from "supertest"
 
+import type { Post } from "../../src/domain/posts.ts"
 import { createApp } from "../../src/http/app.ts"
-import type { Post } from "../../src/repositories/posts.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { registerTagRoutes } from "../../src/routes/tags.ts"
 import { pool, seedPost, truncatePosts } from "../helpers/db.ts"

@@ -3,8 +3,8 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { Post, PostTag } from "../../../src/repositories/posts.ts"
-import type { TagWithCount } from "../../../src/repositories/tags.ts"
+import type { Post, PostTag } from "../../../src/domain/posts.ts"
+import type { TagWithCount } from "../../../src/domain/tags.ts"
 
 const post: Post = {
   id: "post-1",

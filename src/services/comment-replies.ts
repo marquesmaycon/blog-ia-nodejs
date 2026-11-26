@@ -1,14 +1,10 @@
 import { z } from "zod"
 
+import type { Comment } from "../domain/comments.ts"
+import type { Post } from "../domain/posts.ts"
 import { COMMENT_REPLIER_AGENT_ID } from "../mastra/agents/comment-replier.ts"
 import { mastra } from "../mastra/index.ts"
-import {
-  findCommentById,
-  hasAiReply,
-  insertComment,
-  type Comment
-} from "../repositories/comments.ts"
-import type { Post } from "../repositories/posts.ts"
+import { findCommentById, hasAiReply, insertComment } from "../repositories/comments.ts"
 import { truncate } from "../utils/truncate.ts"
 import { findPublishedPost } from "./post-visibility.ts"
 

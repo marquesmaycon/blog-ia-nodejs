@@ -5,11 +5,11 @@ import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
+import type { PostReview } from "../../src/domain/post-reviews.ts"
 import { createApp } from "../../src/http/app.ts"
 import { POST_REVIEWER_AGENT_ID } from "../../src/mastra/agents/post-reviewer.ts"
 import { POST_SEO_AGENT_ID } from "../../src/mastra/agents/post-seo.ts"
 import { mastra } from "../../src/mastra/index.ts"
-import type { PostReview } from "../../src/repositories/post-reviews.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { pool, seedPost, seedPostReview, truncatePosts } from "../helpers/db.ts"
 

@@ -6,8 +6,6 @@ import type { NewPost, Post, PostTag } from "../domain/posts.ts"
 import { findPostById, insertPost } from "./posts.ts"
 import { replacePostTags } from "./tags.ts"
 
-export type { NewPostReview, PostReview } from "../domain/post-reviews.ts"
-
 export const POST_REVIEW_COLUMNS = "id, post_id, attempt, score, issues, suggestions, created_at"
 
 // Recebe o client para gravar na mesma transação do post. Cada review vira uma linha;

@@ -1,9 +1,9 @@
 import { z } from "zod"
 
+import type { Comment } from "../domain/comments.ts"
+import type { Post } from "../domain/posts.ts"
 import { COMMENT_MODERATOR_AGENT_ID } from "../mastra/agents/comment-moderator.ts"
 import { mastra } from "../mastra/index.ts"
-import type { Comment } from "../repositories/comments.ts"
-import type { Post } from "../repositories/posts.ts"
 
 export const MODERATION_CATEGORIES = [
   "spam",

@@ -1,11 +1,10 @@
+import type { Comment, CommentStatus } from "../domain/comments.ts"
 import {
   approveCommentById,
   deleteCommentById,
   findApprovedCommentsByPost,
   findCommentsByStatus,
-  insertComment,
-  type Comment,
-  type CommentStatus
+  insertComment
 } from "../repositories/comments.ts"
 import { moderateComment } from "./comment-moderation.ts"
 import { findPublishedPost, isPublishedPost } from "./post-visibility.ts"

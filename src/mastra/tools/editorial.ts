@@ -1,7 +1,7 @@
 import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 
-import type { Post } from "../../repositories/posts.ts"
+import type { Post } from "../../domain/posts.ts"
 
 // Os repositórios são carregados só na execução: importar o pool do Postgres no topo faria
 // o registro do Mastra (src/mastra/index.ts) exigir DATABASE_URL, inclusive nos testes unitários.

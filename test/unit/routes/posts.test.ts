@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
-import type { PostReview } from "../../../src/repositories/post-reviews.ts"
-import type { Post } from "../../../src/repositories/posts.ts"
+import type { PostReview } from "../../../src/domain/post-reviews.ts"
+import type { Post } from "../../../src/domain/posts.ts"
 import type { PostReviewSummary } from "../../../src/services/post-reviews.ts"
 import type {
   ListPostsOptions,

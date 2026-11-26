@@ -2,13 +2,14 @@
 import assert from "node:assert/strict"
 import { after, beforeEach, describe, it } from "node:test"
 
+import type { NewPostReview } from "../../../src/domain/post-reviews.ts"
+import type { NewPost } from "../../../src/domain/posts.ts"
 import {
   findPostReviews,
   insertPostReviews,
-  insertPostWithReviews,
-  type NewPostReview
+  insertPostWithReviews
 } from "../../../src/repositories/post-reviews.ts"
-import { findPostById, type NewPost } from "../../../src/repositories/posts.ts"
+import { findPostById } from "../../../src/repositories/posts.ts"
 import { pool, seedPost, seedPostReview, truncatePosts } from "../../helpers/db.ts"
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/

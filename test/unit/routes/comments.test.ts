@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
-import type { Comment, CommentStatus } from "../../../src/repositories/comments.ts"
+import type { Comment, CommentStatus } from "../../../src/domain/comments.ts"
 import type { DraftReplyResult } from "../../../src/services/comment-replies.ts"
 import type { CommentInput } from "../../../src/services/comments.ts"
 

@@ -5,9 +5,9 @@ import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
+import type { Comment } from "../../src/domain/comments.ts"
 import { createApp } from "../../src/http/app.ts"
 import { mastra } from "../../src/mastra/index.ts"
-import type { Comment } from "../../src/repositories/comments.ts"
 import { registerCommentRoutes } from "../../src/routes/comments.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { pool, seedComment, seedPost, truncatePosts } from "../helpers/db.ts"

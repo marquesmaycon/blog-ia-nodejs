@@ -1,4 +1,5 @@
-import { findPostReviews, type PostReview } from "../repositories/post-reviews.ts"
+import type { PostReview } from "../domain/post-reviews.ts"
+import { findPostReviews } from "../repositories/post-reviews.ts"
 import { findPostById } from "../repositories/posts.ts"
 
 export type PostReviewSummary = {

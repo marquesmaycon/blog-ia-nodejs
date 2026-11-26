@@ -4,8 +4,8 @@ import { after, beforeEach, describe, it } from "node:test"
 
 import request from "supertest"
 
+import type { PopularPost } from "../../src/domain/posts.ts"
 import { createApp } from "../../src/http/app.ts"
-import type { PopularPost } from "../../src/repositories/posts.ts"
 import { registerLikeRoutes } from "../../src/routes/likes.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { pool, seedComment, seedLike, seedPost, truncatePosts } from "../helpers/db.ts"

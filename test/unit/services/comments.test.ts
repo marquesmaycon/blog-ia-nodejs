@@ -3,8 +3,8 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { Comment, CommentStatus, NewComment } from "../../../src/repositories/comments.ts"
-import type { Post } from "../../../src/repositories/posts.ts"
+import type { Comment, CommentStatus, NewComment } from "../../../src/domain/comments.ts"
+import type { Post } from "../../../src/domain/posts.ts"
 import type {
   CommentToModerate,
   ModerationResult

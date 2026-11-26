@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { PopularPost, Post } from "../../../src/repositories/posts.ts"
+import type { PopularPost, Post } from "../../../src/domain/posts.ts"
 
 const approvedPost: Post = {
   id: "post-1",

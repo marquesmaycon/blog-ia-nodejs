@@ -4,8 +4,6 @@ import { pool, withTransaction, type Queryable } from "../db/index.ts"
 import type { PostTag } from "../domain/posts.ts"
 import type { TagWithCount } from "../domain/tags.ts"
 
-export type { TagWithCount } from "../domain/tags.ts"
-
 // Substitui o conjunto de tags do post, criando as tags que ainda não existem.
 // Os slugs precisam chegar sem repetição: o ON CONFLICT DO UPDATE não pode tocar
 // a mesma linha duas vezes no mesmo comando. Lista vazia remove todas as tags do post.

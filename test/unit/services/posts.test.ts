@@ -3,17 +3,17 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { DraftReview, PostSeo } from "../../../src/mastra/workflows/post-drafting.ts"
-import type { NewPostReview, PostReview } from "../../../src/repositories/post-reviews.ts"
+import type { NewPostReview, PostReview } from "../../../src/domain/post-reviews.ts"
 import type {
   DraftChanges,
-  FindPostsFilters,
   NewPost,
   Pagination,
   Post,
-  PostsPage,
-  PostTag
-} from "../../../src/repositories/posts.ts"
+  PostTag,
+  PostsPage
+} from "../../../src/domain/posts.ts"
+import type { DraftReview, PostSeo } from "../../../src/mastra/workflows/post-drafting.ts"
+import type { FindPostsFilters } from "../../../src/repositories/posts.ts"
 
 const post: Post = {
   id: "abc",

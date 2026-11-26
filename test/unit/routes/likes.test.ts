@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
-import type { PopularPost } from "../../../src/repositories/posts.ts"
+import type { PopularPost } from "../../../src/domain/posts.ts"
 import type { LikeResult, PopularPostsQuery } from "../../../src/services/likes.ts"
 
 const popular: PopularPost = {

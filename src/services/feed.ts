@@ -1,4 +1,5 @@
-import { findPosts, type Post } from "../repositories/posts.ts"
+import type { Post } from "../domain/posts.ts"
+import { findPosts } from "../repositories/posts.ts"
 
 export const FEED_SIZE = 20
 const DESCRIPTION_LENGTH = 280

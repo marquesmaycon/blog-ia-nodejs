@@ -3,13 +3,9 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type {
-  FindPostsFilters,
-  Pagination,
-  PopularPost,
-  Post
-} from "../../../src/repositories/posts.ts"
-import type { TagWithCount } from "../../../src/repositories/tags.ts"
+import type { Pagination, PopularPost, Post } from "../../../src/domain/posts.ts"
+import type { TagWithCount } from "../../../src/domain/tags.ts"
+import type { FindPostsFilters } from "../../../src/repositories/posts.ts"
 
 const post: Post = {
   id: "post-1",

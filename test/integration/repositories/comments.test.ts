@@ -2,6 +2,7 @@
 import assert from "node:assert/strict"
 import { after, beforeEach, describe, it } from "node:test"
 
+import type { Post } from "../../../src/domain/posts.ts"
 import {
   approveCommentById,
   deleteCommentById,
@@ -11,7 +12,6 @@ import {
   hasAiReply,
   insertComment
 } from "../../../src/repositories/comments.ts"
-import type { Post } from "../../../src/repositories/posts.ts"
 import { pool, seedComment, seedPost, truncatePosts } from "../../helpers/db.ts"
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/

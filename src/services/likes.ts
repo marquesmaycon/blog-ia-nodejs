@@ -1,5 +1,6 @@
+import type { PopularPost } from "../domain/posts.ts"
 import { countLikesByPost, deleteLike, insertLike } from "../repositories/likes.ts"
-import { findPopularPosts, type PopularPost } from "../repositories/posts.ts"
+import { findPopularPosts } from "../repositories/posts.ts"
 import { isPublishedPost } from "./post-visibility.ts"
 
 export type LikeResult = {

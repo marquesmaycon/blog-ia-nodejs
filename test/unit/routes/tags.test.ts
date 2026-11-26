@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
-import type { Post } from "../../../src/repositories/posts.ts"
-import type { TagWithCount } from "../../../src/repositories/tags.ts"
+import type { Post } from "../../../src/domain/posts.ts"
+import type { TagWithCount } from "../../../src/domain/tags.ts"
 
 const post: Post = {
   id: "post-1",

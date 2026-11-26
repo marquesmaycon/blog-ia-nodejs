@@ -1,4 +1,5 @@
-import { findPostById, type Post } from "../repositories/posts.ts"
+import type { Post } from "../domain/posts.ts"
+import { findPostById } from "../repositories/posts.ts"
 
 // Leitores só interagem com posts publicados: rascunhos e reprovados ficam invisíveis
 export async function findPublishedPost(postId: string): Promise<Post | null> {

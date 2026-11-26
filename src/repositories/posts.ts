@@ -11,17 +11,6 @@ import type {
   PostsPage
 } from "../domain/posts.ts"
 
-export type {
-  DraftChanges,
-  NewPost,
-  Pagination,
-  PopularPost,
-  Post,
-  PostFilters,
-  PostsPage,
-  PostTag
-} from "../domain/posts.ts"
-
 export type FindPostsFilters = PostFilters & {
   approvedOnly: boolean
 }

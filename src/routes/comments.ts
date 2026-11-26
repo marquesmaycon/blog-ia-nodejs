@@ -1,10 +1,10 @@
 import { z } from "zod"
 
+import { COMMENT_STATUSES, type CommentStatus } from "../domain/comments.ts"
 import type { App } from "../http/app.ts"
 import { requireApiKey } from "../http/auth.ts"
 import { createRateLimiter, type RateLimitOptions } from "../http/rate-limit.ts"
 import { sendValidationError } from "../http/validation.ts"
-import type { CommentStatus } from "../repositories/comments.ts"
 import { draftCommentReply, type DraftReplyError } from "../services/comment-replies.ts"
 import {
   approveComment,
@@ -18,9 +18,6 @@ const createCommentBodySchema = z.object({
   author_name: z.string().trim().min(1).max(80),
   content: z.string().trim().min(1).max(2000)
 })
-
-// Import só de tipo: importar valores do repositório carregaria o pool do Postgres
-const COMMENT_STATUSES = ["pending", "approved", "rejected"] as const satisfies CommentStatus[]
 
 // Objeto (e não o enum solto) para o erro apontar o campo "status"
 const listCommentsQuerySchema = z.object({

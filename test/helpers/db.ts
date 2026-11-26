@@ -1,7 +1,10 @@
 import { pool } from "../../src/db/index.ts"
-import { COMMENT_COLUMNS, type Comment } from "../../src/repositories/comments.ts"
-import { POST_REVIEW_COLUMNS, type PostReview } from "../../src/repositories/post-reviews.ts"
-import { POST_COLUMNS, type Post, type PostTag } from "../../src/repositories/posts.ts"
+import type { Comment } from "../../src/domain/comments.ts"
+import type { PostReview } from "../../src/domain/post-reviews.ts"
+import type { Post, PostTag } from "../../src/domain/posts.ts"
+import { COMMENT_COLUMNS } from "../../src/repositories/comments.ts"
+import { POST_REVIEW_COLUMNS } from "../../src/repositories/post-reviews.ts"
+import { POST_COLUMNS } from "../../src/repositories/posts.ts"
 import { slugify } from "../../src/utils/slugify.ts"
 
 export { pool }

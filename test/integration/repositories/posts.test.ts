@@ -2,6 +2,7 @@
 import assert from "node:assert/strict"
 import { after, beforeEach, describe, it } from "node:test"
 
+import type { NewPost, Post, PostFilters } from "../../../src/domain/posts.ts"
 import {
   approvePostById,
   findPopularPosts,
@@ -11,10 +12,7 @@ import {
   findTakenSlugs,
   insertPost,
   rejectPostById,
-  updateDraftById,
-  type NewPost,
-  type Post,
-  type PostFilters
+  updateDraftById
 } from "../../../src/repositories/posts.ts"
 import {
   pool,

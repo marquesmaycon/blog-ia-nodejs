@@ -1,6 +1,8 @@
+import type { PostReview } from "../domain/post-reviews.ts"
+import type { Post, PostFilters } from "../domain/posts.ts"
 import { mastra } from "../mastra/index.ts"
 import { POST_DRAFTING_WORKFLOW_ID } from "../mastra/workflows/post-drafting.ts"
-import { insertPostWithReviews, type PostReview } from "../repositories/post-reviews.ts"
+import { insertPostWithReviews } from "../repositories/post-reviews.ts"
 import {
   approvePostById,
   findPostById,
@@ -8,9 +10,7 @@ import {
   findPublishedPostBySlug,
   findTakenSlugs,
   rejectPostById,
-  updateDraftById,
-  type Post,
-  type PostFilters
+  updateDraftById
 } from "../repositories/posts.ts"
 import { findAllTagNames } from "../repositories/tags.ts"
 import { readingTimeMinutes } from "../utils/reading-time.ts"

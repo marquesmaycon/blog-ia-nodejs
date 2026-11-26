@@ -6,11 +6,11 @@ import { after, afterEach, beforeEach, describe, it, mock } from "node:test"
 
 import request from "supertest"
 
+import type { Post } from "../../src/domain/posts.ts"
 import { createApp } from "../../src/http/app.ts"
 import { POST_REVIEWER_AGENT_ID } from "../../src/mastra/agents/post-reviewer.ts"
 import { POST_SEO_AGENT_ID } from "../../src/mastra/agents/post-seo.ts"
 import { mastra } from "../../src/mastra/index.ts"
-import type { Post } from "../../src/repositories/posts.ts"
 import { registerFeedRoutes } from "../../src/routes/feed.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { pool, truncatePosts } from "../helpers/db.ts"

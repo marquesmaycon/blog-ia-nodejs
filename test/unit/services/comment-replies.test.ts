@@ -3,8 +3,8 @@
 import assert from "node:assert/strict"
 import { afterEach, beforeEach, describe, it, mock } from "node:test"
 
-import type { Comment, NewComment } from "../../../src/repositories/comments.ts"
-import type { Post } from "../../../src/repositories/posts.ts"
+import type { Comment, NewComment } from "../../../src/domain/comments.ts"
+import type { Post } from "../../../src/domain/posts.ts"
 
 type GenerateOptions = { structuredOutput: { schema: unknown }; abortSignal: AbortSignal }
 
