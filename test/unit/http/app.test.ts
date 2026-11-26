@@ -2,8 +2,11 @@ import assert from "node:assert/strict"
 import { describe, it, mock } from "node:test"
 
 import request from "supertest"
+import { z } from "zod"
 
-import { createApp } from "../../../src/http/app.ts"
+import { createApp, HttpError } from "../../../src/http/app.ts"
+import { forbidden, notFound } from "../../../src/http/errors.ts"
+import { ValidationError } from "../../../src/http/validation.ts"
 
 describe("createApp", () => {
   describe("roteamento", () => {
@@ -186,6 +189,97 @@ describe("createApp", () => {
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Internal Server Error" })
       assert.equal(consoleError.mock.callCount(), 1)
+    })
+  })
+
+  describe("tratamento de erros", () => {
+    it("responde HttpError com o status e a mensagem, sem logar", async (t) => {
+      const consoleError = t.mock.method(console, "error", () => {})
+      const app = createApp()
+      app.get("/missing", () => {
+        throw notFound("Post not found")
+      })
+
+      const res = await request(app.server).get("/missing")
+
+      assert.equal(res.status, 404)
+      assert.deepEqual(res.body, { message: "Post not found" })
+      assert.equal(consoleError.mock.callCount(), 0)
+    })
+
+    it("inclui os details do HttpError na resposta", async () => {
+      const app = createApp()
+      app.post("/reply", () => {
+        throw new HttpError(422, "Not answerable", { reason: "Fora do tema" })
+      })
+
+      const res = await request(app.server).post("/reply")
+
+      assert.equal(res.status, 422)
+      assert.deepEqual(res.body, { message: "Not answerable", reason: "Fora do tema" })
+    })
+
+    it("responde ValidationError com 400 e um erro por campo", async () => {
+      const app = createApp()
+      app.post("/validate", () => {
+        const parsed = z.object({ name: z.string() }).safeParse({})
+        if (!parsed.success) throw new ValidationError(parsed.error, "Invalid request body")
+      })
+
+      const res = await request(app.server).post("/validate")
+
+      assert.equal(res.status, 400)
+      assert.deepEqual(res.body, {
+        message: "Invalid request body",
+        errors: [{ field: "name", message: "Invalid input: expected string, received undefined" }]
+      })
+    })
+
+    it("usa a mensagem e o log do onError da rota para erros inesperados", async (t) => {
+      const consoleError = t.mock.method(console, "error", () => {})
+      const error = new Error("db down")
+      const app = createApp()
+      app.get(
+        "/posts",
+        () => {
+          throw error
+        },
+        { onError: { message: "Failed to list posts", log: "Falha ao listar os posts:" } }
+      )
+
+      const res = await request(app.server).get("/posts")
+
+      assert.equal(res.status, 500)
+      assert.deepEqual(res.body, { message: "Failed to list posts" })
+      assert.deepEqual(consoleError.mock.calls[0].arguments, ["Falha ao listar os posts:", error])
+    })
+
+    it("usa o status do onError quando informado", async (t) => {
+      t.mock.method(console, "error", () => {})
+      const app = createApp()
+      app.post(
+        "/draft",
+        () => {
+          throw new Error("llm down")
+        },
+        { onError: { message: "Failed to generate post", log: "Falha:", status: 502 } }
+      )
+
+      const res = await request(app.server).post("/draft")
+
+      assert.equal(res.status, 502)
+      assert.deepEqual(res.body, { message: "Failed to generate post" })
+    })
+
+    it("não aplica o onError a HttpError nem a ValidationError", async () => {
+      const app = createApp()
+      const onError = { message: "Failed", log: "Falha:" }
+      app.get("/forbidden", () => Promise.reject(forbidden()), { onError })
+
+      const res = await request(app.server).get("/forbidden")
+
+      assert.equal(res.status, 403)
+      assert.deepEqual(res.body, { message: "Forbidden" })
     })
   })
 })

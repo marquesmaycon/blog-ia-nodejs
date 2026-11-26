@@ -1,5 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 
+import { HttpError } from "./errors.ts"
+import { ValidationError } from "./validation.ts"
+
+export { HttpError } from "./errors.ts"
+
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 // Infere os path params a partir do literal da rota: "/posts/:id" -> { id: string }
@@ -32,24 +37,22 @@ export type Handler<Params = Record<string, string>> = (
   res: Reply
 ) => unknown | Promise<unknown>
 
+// Como a rota responde a um erro inesperado (nem HttpError, nem ValidationError):
+// loga com `log` e responde `{ message }` com `status` (padrão 500)
+export type RouteErrorOptions = { message: string; log: string; status?: number }
+
+export type RouteOptions = { onError?: RouteErrorOptions }
+
 type Segment = { type: "static"; value: string } | { type: "param"; name: string }
 
 type Route = {
   method: HttpMethod
   segments: Segment[]
   handler: Handler<any>
+  onError?: RouteErrorOptions
 }
 
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH", "DELETE"])
-
-class HttpError extends Error {
-  statusCode: number
-
-  constructor(statusCode: number, message: string) {
-    super(message)
-    this.statusCode = statusCode
-  }
-}
 
 function splitPath(path: string): string[] {
   return path.split("/").filter(Boolean)
@@ -159,9 +162,10 @@ export function createApp() {
   function addRoute<Path extends string>(
     method: HttpMethod,
     path: Path,
-    handler: Handler<ExtractParams<Path>>
+    handler: Handler<ExtractParams<Path>>,
+    options: RouteOptions = {}
   ) {
-    routes.push({ method, segments: compilePath(path), handler })
+    routes.push({ method, segments: compilePath(path), handler, onError: options.onError })
     routes.sort(compareSpecificity)
   }
 
@@ -205,7 +209,17 @@ export function createApp() {
       }
 
       if (error instanceof HttpError) {
-        return res.status(error.statusCode).send({ message: error.message })
+        return res.status(error.statusCode).send({ message: error.message, ...error.details })
+      }
+
+      if (error instanceof ValidationError) {
+        return res.status(400).send({ message: error.message, errors: error.issues })
+      }
+
+      const { onError } = matched.route
+      if (onError) {
+        console.error(onError.log, error)
+        return res.status(onError.status ?? 500).send({ message: onError.message })
       }
 
       console.error(`Erro não tratado em ${method} ${url.pathname}:`, error)
@@ -217,16 +231,31 @@ export function createApp() {
 
   return {
     server,
-    get: <Path extends string>(path: Path, handler: Handler<ExtractParams<Path>>) =>
-      addRoute("GET", path, handler),
-    post: <Path extends string>(path: Path, handler: Handler<ExtractParams<Path>>) =>
-      addRoute("POST", path, handler),
-    put: <Path extends string>(path: Path, handler: Handler<ExtractParams<Path>>) =>
-      addRoute("PUT", path, handler),
-    patch: <Path extends string>(path: Path, handler: Handler<ExtractParams<Path>>) =>
-      addRoute("PATCH", path, handler),
-    delete: <Path extends string>(path: Path, handler: Handler<ExtractParams<Path>>) =>
-      addRoute("DELETE", path, handler),
+    get: <Path extends string>(
+      path: Path,
+      handler: Handler<ExtractParams<Path>>,
+      options?: RouteOptions
+    ) => addRoute("GET", path, handler, options),
+    post: <Path extends string>(
+      path: Path,
+      handler: Handler<ExtractParams<Path>>,
+      options?: RouteOptions
+    ) => addRoute("POST", path, handler, options),
+    put: <Path extends string>(
+      path: Path,
+      handler: Handler<ExtractParams<Path>>,
+      options?: RouteOptions
+    ) => addRoute("PUT", path, handler, options),
+    patch: <Path extends string>(
+      path: Path,
+      handler: Handler<ExtractParams<Path>>,
+      options?: RouteOptions
+    ) => addRoute("PATCH", path, handler, options),
+    delete: <Path extends string>(
+      path: Path,
+      handler: Handler<ExtractParams<Path>>,
+      options?: RouteOptions
+    ) => addRoute("DELETE", path, handler, options),
     listen(options: { port: number; host?: string }, callback?: () => void) {
       server.listen(options.port, options.host, callback)
       return server
