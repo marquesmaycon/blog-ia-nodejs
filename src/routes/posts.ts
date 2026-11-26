@@ -1,8 +1,9 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { requireApiKey } from "../http/auth.ts"
-import { sendValidationError } from "../http/validation.ts"
+import { assertApiKey } from "../http/auth.ts"
+import { badRequest, conflict, notFound } from "../http/errors.ts"
+import { parseBody, parseQuery, parseValue } from "../http/validation.ts"
 import { getPostReviews } from "../services/post-reviews.ts"
 import {
   approvePost,
@@ -60,156 +61,116 @@ const listPostsQuerySchema = z.object({
 })
 
 export function registerPostRoutes(app: App) {
-  app.get("/posts", async (req, res) => {
-    const include = req.query.get("include")
+  app.get(
+    "/posts",
+    async (req) => {
+      // Fora do schema da query: o 400 tem mensagem própria e vem antes dos outros campos
+      const include = req.query.get("include")
+      if (include !== null && include !== "all") throw badRequest("Invalid value for 'include'")
 
-    if (include !== null && include !== "all") {
-      return res.status(400).send({ message: "Invalid value for 'include'" })
-    }
+      const { tag, page, limit, q } = parseQuery(req, listPostsQuerySchema)
 
-    const query = listPostsQuerySchema.safeParse({
-      tag: req.query.get("tag") ?? undefined,
-      page: req.query.get("page") ?? undefined,
-      limit: req.query.get("limit") ?? undefined,
-      q: req.query.get("q") ?? undefined
-    })
-    if (!query.success) return sendValidationError(res, query.error, "Invalid query parameters")
+      const includeAll = include === "all"
+      if (includeAll) assertApiKey(req)
 
-    const includeAll = include === "all"
+      return listPosts({ includeAll, tag, page, limit, q })
+    },
+    { onError: { message: "Failed to list posts", log: "Falha ao listar os posts:" } }
+  )
 
-    if (includeAll && !requireApiKey(req, res)) return
-
-    try {
-      return res.send(await listPosts({ includeAll, ...query.data }))
-    } catch (error) {
-      console.error("Falha ao listar os posts:", error)
-      return res.status(500).send({ message: "Failed to list posts" })
-    }
-  })
-
-  app.get("/posts/:id", async (req, res) => {
-    try {
+  app.get(
+    "/posts/:id",
+    async (req) => {
       const post = await getPost(req.params.id)
+      if (!post) throw notFound("Post not found")
 
-      if (!post) {
-        return res.status(404).send({ message: "Post not found" })
-      }
-
-      return res.send({ data: post })
-    } catch (error) {
-      console.error("Falha ao buscar o post:", error)
-      return res.status(500).send({ message: "Failed to get post" })
-    }
-  })
+      return { data: post }
+    },
+    { onError: { message: "Failed to get post", log: "Falha ao buscar o post:" } }
+  )
 
   // Rota pública de leitura: só posts publicados
-  app.get("/posts/slug/:slug", async (req, res) => {
-    const slug = postSlugSchema.safeParse(req.params.slug)
-    if (!slug.success) return sendValidationError(res, slug.error, "Invalid slug")
+  app.get(
+    "/posts/slug/:slug",
+    async (req) => {
+      const slug = parseValue(req.params.slug, postSlugSchema, "Invalid slug")
 
-    try {
-      const post = await getPublishedPostBySlug(slug.data)
+      const post = await getPublishedPostBySlug(slug)
+      if (!post) throw notFound("Post not found")
 
-      if (!post) {
-        return res.status(404).send({ message: "Post not found" })
-      }
-
-      return res.send({ data: post })
-    } catch (error) {
-      console.error("Falha ao buscar o post pelo slug:", error)
-      return res.status(500).send({ message: "Failed to get post" })
-    }
-  })
+      return { data: post }
+    },
+    { onError: { message: "Failed to get post", log: "Falha ao buscar o post pelo slug:" } }
+  )
 
   // Dado editorial: as notas e críticas do revisor IA, para o admin decidir a aprovação
-  app.get("/posts/:id/review", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.get(
+    "/posts/:id/review",
+    async (req) => {
+      assertApiKey(req)
 
-    try {
       const reviews = await getPostReviews(req.params.id)
+      if (!reviews) throw notFound("Post not found")
 
-      if (!reviews) {
-        return res.status(404).send({ message: "Post not found" })
-      }
-
-      return res.send({ data: reviews })
-    } catch (error) {
-      console.error("Falha ao buscar as revisões do post:", error)
-      return res.status(500).send({ message: "Failed to get post review" })
+      return { data: reviews }
+    },
+    {
+      onError: { message: "Failed to get post review", log: "Falha ao buscar as revisões do post:" }
     }
-  })
+  )
 
-  app.put("/posts/:id", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.put(
+    "/posts/:id",
+    async (req) => {
+      assertApiKey(req)
+      const changes = parseBody(req, updatePostBodySchema)
 
-    const parsed = updatePostBodySchema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
+      const result = await updatePostDraft(req.params.id, changes)
+      if (result.status === "not_found") throw notFound("Post not found")
+      if (result.status === "approved") throw conflict("Approved posts cannot be edited")
 
-    try {
-      const result = await updatePostDraft(req.params.id, parsed.data)
+      return { message: "Post updated", data: result.post }
+    },
+    { onError: { message: "Failed to update post", log: "Falha ao editar o post:" } }
+  )
 
-      if (result.status === "not_found") {
-        return res.status(404).send({ message: "Post not found" })
-      }
+  app.patch(
+    "/posts/:id/approve",
+    async (req) => {
+      assertApiKey(req)
 
-      if (result.status === "approved") {
-        return res.status(409).send({ message: "Approved posts cannot be edited" })
-      }
-
-      return res.send({ message: "Post updated", data: result.post })
-    } catch (error) {
-      console.error("Falha ao editar o post:", error)
-      return res.status(500).send({ message: "Failed to update post" })
-    }
-  })
-
-  app.patch("/posts/:id/approve", async (req, res) => {
-    if (!requireApiKey(req, res)) return
-
-    try {
       const post = await approvePost(req.params.id)
+      if (!post) throw notFound("Post not found")
 
-      if (!post) {
-        return res.status(404).send({ message: "Post not found" })
-      }
+      return { message: "Post approved", data: post }
+    },
+    { onError: { message: "Failed to approve post", log: "Falha ao aprovar o post:" } }
+  )
 
-      return res.send({ message: "Post approved", data: post })
-    } catch (error) {
-      console.error("Falha ao aprovar o post:", error)
-      return res.status(500).send({ message: "Failed to approve post" })
-    }
-  })
+  app.delete(
+    "/posts/:id/reject",
+    async (req) => {
+      assertApiKey(req)
 
-  app.delete("/posts/:id/reject", async (req, res) => {
-    if (!requireApiKey(req, res)) return
-
-    try {
       const post = await rejectPost(req.params.id)
+      if (!post) throw notFound("Post not found")
 
-      if (!post) {
-        return res.status(404).send({ message: "Post not found" })
-      }
+      return { message: "Post rejected", data: post }
+    },
+    { onError: { message: "Failed to reject post", log: "Falha ao reprovar o post:" } }
+  )
 
-      return res.send({ message: "Post rejected", data: post })
-    } catch (error) {
-      console.error("Falha ao reprovar o post:", error)
-      return res.status(500).send({ message: "Failed to reject post" })
-    }
-  })
+  app.post(
+    "/posts/draft",
+    async (req, res) => {
+      // Auth antes da validação: anônimo recebe 403 e nunca chega ao LLM
+      assertApiKey(req)
+      const { idea } = parseBody(req, createPostDraftBodySchema)
 
-  app.post("/posts/draft", async (req, res) => {
-    // Auth antes da validação: anônimo recebe 403 e nunca chega ao LLM
-    if (!requireApiKey(req, res)) return
-
-    const parsed = createPostDraftBodySchema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
-
-    try {
-      const post = await createPostDraft(parsed.data.idea)
+      const post = await createPostDraft(idea)
       return res.status(201).send({ message: "Post draft created", data: post })
-    } catch (error) {
-      console.error("Falha ao gerar o post:", error)
-      return res.status(502).send({ message: "Failed to generate post" })
-    }
-  })
+    },
+    // Qualquer falha na geração vira 502: o erro está no LLM, não na API
+    { onError: { message: "Failed to generate post", log: "Falha ao gerar o post:", status: 502 } }
+  )
 }
