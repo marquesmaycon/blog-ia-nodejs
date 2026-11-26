@@ -1,3 +1,4 @@
+import { isUniqueViolation } from "../db/errors.ts"
 import type { PostReview } from "../domain/post-reviews.ts"
 import type { Post, PostFilters } from "../domain/posts.ts"
 import { mastra } from "../mastra/index.ts"
@@ -84,17 +85,6 @@ export async function generateUniqueSlug(title: string, excludeId?: string): Pro
   return `${base}-${Math.max(1, ...suffixes) + 1}`
 }
 
-function isSlugConflict(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "23505" &&
-    "constraint" in error &&
-    error.constraint === "posts_slug_key"
-  )
-}
-
 // Gera o slug e persiste; em colisão (corrida entre inserts) gera de novo e repete
 async function withUniqueSlug<T>(
   title: string,
@@ -107,7 +97,7 @@ async function withUniqueSlug<T>(
     try {
       return await persist(slug)
     } catch (error) {
-      if (!isSlugConflict(error) || attempt >= SLUG_ATTEMPTS) throw error
+      if (!isUniqueViolation(error, "posts_slug_key") || attempt >= SLUG_ATTEMPTS) throw error
     }
   }
 }

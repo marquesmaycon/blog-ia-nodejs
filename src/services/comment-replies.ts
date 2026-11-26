@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import { env } from "../config/env.ts"
+import { isUniqueViolation } from "../db/errors.ts"
 import type { Comment } from "../domain/comments.ts"
 import type { Post } from "../domain/posts.ts"
 import { COMMENT_REPLIER_AGENT_ID } from "../mastra/agents/comment-replier.ts"
@@ -44,17 +45,6 @@ function buildPrompt(post: Pick<Post, "title" | "content">, comment: CommentToRe
     `Autor do comentário: ${comment.author_name}`,
     `<comentario>\n${comment.content}\n</comentario>`
   ].join("\n\n")
-}
-
-function isAiReplyConflict(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "23505" &&
-    "constraint" in error &&
-    error.constraint === "comments_ai_reply_per_parent_idx"
-  )
 }
 
 // Só comentários de leitores, de primeiro nível e já aprovados recebem resposta
@@ -109,7 +99,8 @@ export async function draftCommentReply(commentId: string): Promise<DraftReplyRe
     return { ok: true, reply }
   } catch (error) {
     // Outra requisição gravou a resposta enquanto o agente gerava esta
-    if (isAiReplyConflict(error)) return { ok: false, error: "already_replied" }
+    if (isUniqueViolation(error, "comments_ai_reply_per_parent_idx"))
+      return { ok: false, error: "already_replied" }
     throw error
   }
 }
