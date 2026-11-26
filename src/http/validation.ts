@@ -1,6 +1,6 @@
 import type { z, ZodError, ZodType } from "zod"
 
-import type { Reply, Request } from "./app.ts"
+import type { Request } from "./app.ts"
 
 export type ValidationIssue = {
   // Caminho do campo ("content", "tags.0"); null quando o erro é no valor inteiro (ex.: body ausente)
@@ -29,12 +29,6 @@ export class ValidationError extends Error {
   get issues(): ValidationIssue[] {
     return toValidationIssues(this.zodError)
   }
-}
-
-// Resposta 400 padrão para falhas de validação do zod, com uma entrada por problema encontrado.
-// Uso: `if (!parsed.success) return sendValidationError(res, parsed.error)`
-export function sendValidationError(res: Reply, error: ZodError, message = "Invalid request") {
-  return res.status(400).send({ message, errors: toValidationIssues(error) })
 }
 
 function parseWith<S extends ZodType>(value: unknown, schema: S, message: string): z.output<S> {

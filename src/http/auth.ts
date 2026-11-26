@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 
 import { env } from "../config/env.ts"
-import type { Reply, Request } from "./app.ts"
+import type { Request } from "./app.ts"
 import { forbidden } from "./errors.ts"
 
 function extractBearerToken(req: Request<unknown>): string | null {
@@ -31,16 +31,7 @@ export function hasValidApiKey(req: Request<unknown>): boolean {
   return safeEqual(token, apiKey)
 }
 
-// Guarda para rotas administrativas: responde 403 e retorna false quando a API key é inválida.
-// Uso: `if (!requireApiKey(req, res)) return`
-export function requireApiKey(req: Request<unknown>, res: Reply): boolean {
-  if (hasValidApiKey(req)) return true
-
-  res.status(403).send({ message: "Forbidden" })
-  return false
-}
-
-// Variante que lança: o handler central responde 403 `{ message: "Forbidden" }`.
+// Guarda para rotas administrativas: lança HttpError 403 (`{ message: "Forbidden" }`)
 // Uso: `assertApiKey(req)` no início do handler
 export function assertApiKey(req: Request<unknown>): void {
   if (!hasValidApiKey(req)) throw forbidden()

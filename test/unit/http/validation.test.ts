@@ -10,7 +10,7 @@ import {
   parseHeaders,
   parseQuery,
   parseValue,
-  sendValidationError
+  ValidationError
 } from "../../../src/http/validation.ts"
 
 const schema = z.object({
@@ -22,13 +22,13 @@ function buildServer(message?: string) {
   const app = createApp()
   app.post("/", (req, res) => {
     const parsed = schema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, message)
+    if (!parsed.success) throw new ValidationError(parsed.error, message)
     return res.send({ ok: true })
   })
   return app.server
 }
 
-describe("sendValidationError", () => {
+describe("ValidationError", () => {
   it("responde 400 com um erro por campo, com o caminho completo", async () => {
     const res = await request(buildServer())
       .post("/")
