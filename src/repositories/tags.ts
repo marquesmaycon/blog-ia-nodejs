@@ -1,12 +1,10 @@
 import { nanoid } from "nanoid"
 
 import { pool, withTransaction, type Queryable } from "../db/index.ts"
-import type { PostTag } from "./posts.ts"
+import type { PostTag } from "../domain/posts.ts"
+import type { TagWithCount } from "../domain/tags.ts"
 
-export type TagWithCount = PostTag & {
-  // Só posts aprovados entram na contagem
-  posts_count: number
-}
+export type { TagWithCount } from "../domain/tags.ts"
 
 // Substitui o conjunto de tags do post, criando as tags que ainda não existem.
 // Os slugs precisam chegar sem repetição: o ON CONFLICT DO UPDATE não pode tocar

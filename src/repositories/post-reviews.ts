@@ -1,22 +1,12 @@
 import { nanoid } from "nanoid"
 
 import { pool, withTransaction, type Queryable } from "../db/index.ts"
-import { findPostById, insertPost, type NewPost, type Post, type PostTag } from "./posts.ts"
+import type { NewPostReview, PostReview } from "../domain/post-reviews.ts"
+import type { NewPost, Post, PostTag } from "../domain/posts.ts"
+import { findPostById, insertPost } from "./posts.ts"
 import { replacePostTags } from "./tags.ts"
 
-export type PostReview = {
-  id: string
-  post_id: string
-  // Tentativa avaliada: 1 é a primeira versão escrita, as seguintes são reescritas
-  attempt: number
-  // 0 a 10 (CHECK da migration 008)
-  score: number
-  issues: string[]
-  suggestions: string[]
-  created_at: string
-}
-
-export type NewPostReview = Pick<PostReview, "attempt" | "score" | "issues" | "suggestions">
+export type { NewPostReview, PostReview } from "../domain/post-reviews.ts"
 
 export const POST_REVIEW_COLUMNS = "id, post_id, attempt, score, issues, suggestions, created_at"
 
