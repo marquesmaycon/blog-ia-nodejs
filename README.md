@@ -19,9 +19,16 @@ src/
 ├── http/
 │   ├── app.ts             # roteador e servidor HTTP
 │   └── auth.ts            # validação da API key (Bearer token)
-├── docs/openapi.ts        # especificação OpenAPI
+├── docs/
+│   ├── openapi.ts         # monta a especificação OpenAPI (info, tags, segurança, paths)
+│   ├── components.ts      # modelos de resposta (Post, Comment, Tag...)
+│   ├── responses.ts       # respostas reutilizadas (erros, post, comentário...)
+│   ├── params.ts          # path params escritos à mão (id, slug da tag)
+│   ├── zod.ts             # gera parâmetros e request bodies a partir dos schemas zod
+│   └── paths/             # paths documentados por recurso
 ├── routes/
 │   ├── docs.ts            # rotas /api/docs (Swagger UI) e /api/docs/json
+│   ├── *.schemas.ts       # schemas zod das rotas, reutilizados pela spec
 │   ├── posts.ts           # rotas /posts
 │   ├── comments.ts        # rotas de comentários
 │   ├── likes.ts           # rotas de curtidas e posts populares
@@ -142,7 +149,7 @@ As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /po
 
 As rotas públicas de escrita têm rate limiting em memória, por IP: `POST /posts/:id/comments` aceita 5 requisições por minuto, e `POST`/`DELETE /posts/:id/likes` dividem uma cota de 30 por minuto. As respostas trazem os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Ao estourar a cota, a rota responde `429 { message: "Too Many Requests" }` com `Retry-After` (em segundos). Atrás de um proxy reverso, defina `TRUST_PROXY=true` para que o IP venha do `X-Forwarded-For`; sem isso, o header é ignorado, porque o cliente poderia forjá-lo. Como os contadores ficam na memória, cada instância da API tem os seus, e um restart zera todos.
 
-A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). A spec é mantida à mão em [src/docs/openapi.ts](src/docs/openapi.ts), então atualize-a junto com as rotas. Os assets da Swagger UI vêm do CDN unpkg.
+A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:8080/api/docs) e a especificação OpenAPI 3.1 em [`/api/docs/json`](http://localhost:8080/api/docs/json). Os parâmetros de query e de header e os request bodies são gerados dos schemas zod em `src/routes/*.schemas.ts`, então limites, defaults e padrões vêm da mesma fonte que valida as requisições; descrições e exemplos ficam no `.meta()` de cada campo. As respostas e as descrições das operações continuam escritas à mão em [src/docs/](src/docs/). Um teste unitário compara as rotas registradas com os paths da spec e falha quando uma rota fica sem documentação. Os assets da Swagger UI vêm do CDN unpkg.
 
 ### Modelo `Post`
 
