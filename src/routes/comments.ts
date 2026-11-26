@@ -5,6 +5,7 @@ import { requireApiKey } from "../http/auth.ts"
 import { createRateLimiter, type RateLimitOptions } from "../http/rate-limit.ts"
 import { sendValidationError } from "../http/validation.ts"
 import type { CommentStatus } from "../repositories/comments.ts"
+import { draftCommentReply, type DraftReplyError } from "../services/comment-replies.ts"
 import {
   approveComment,
   createComment,
@@ -31,6 +32,16 @@ const CREATED_MESSAGES: Record<CommentStatus, string> = {
   approved: "Comment published",
   rejected: "Comment rejected",
   pending: "Comment awaiting moderation"
+}
+
+// Como cada falha do rascunho de resposta aparece para o admin
+const REPLY_ERRORS: Record<DraftReplyError, { status: number; message: string }> = {
+  not_found: { status: 404, message: "Comment not found" },
+  not_eligible: { status: 409, message: "Comment cannot be replied" },
+  already_replied: { status: 409, message: "Reply already exists" },
+  not_a_question: { status: 422, message: "Comment is not an answerable question" },
+  not_answerable: { status: 422, message: "Comment is not an answerable question" },
+  generation_failed: { status: 502, message: "Failed to generate reply" }
 }
 
 // Padrão: 5 comentários por minuto por IP
@@ -109,6 +120,26 @@ export function registerCommentRoutes(app: App, options: CommentRoutesOptions = 
     } catch (error) {
       console.error("Falha ao aprovar o comentário:", error)
       return res.status(500).send({ message: "Failed to approve comment" })
+    }
+  })
+
+  app.post("/comments/:id/reply", async (req, res) => {
+    if (!requireApiKey(req, res)) return
+
+    try {
+      const result = await draftCommentReply(req.params.id)
+
+      if (!result.ok) {
+        const { status, message } = REPLY_ERRORS[result.error]
+        return res
+          .status(status)
+          .send(result.reason ? { message, reason: result.reason } : { message })
+      }
+
+      return res.status(201).send({ message: "Reply draft created", data: result.reply })
+    } catch (error) {
+      console.error("Falha ao criar a resposta do comentário:", error)
+      return res.status(500).send({ message: "Failed to create reply" })
     }
   })
 
