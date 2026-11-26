@@ -26,6 +26,7 @@ src/
 │   ├── comments.ts        # rotas de comentários
 │   ├── likes.ts           # rotas de curtidas e posts populares
 │   ├── tags.ts            # rotas de tags
+│   ├── editorial.ts       # pautas sugeridas pela IA (/editorial/ideas)
 │   └── feed.ts            # feed RSS (/feed.xml)
 ├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas, tags, feed)
 ├── repositories/          # acesso ao Postgres (posts, post_reviews, comments, likes, tags)
@@ -36,7 +37,8 @@ src/
 │   └── seo.ts             # limites de summary e meta_description
 ├── mastra/
 │   ├── index.ts           # instância Mastra (registra agentes e workflows)
-│   ├── agents/            # post-writer, post-reviewer, post-seo, comment-moderator e comment-replier
+│   ├── agents/            # post-writer, post-reviewer, post-seo, comment-moderator, comment-replier e editorial-planner
+│   ├── tools/             # tools do editorial-planner (posts populares, tags e busca)
 │   └── workflows/         # post-drafting: escrever → revisar → reescrever → SEO
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
@@ -93,6 +95,8 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 | `POST_REVIEW_TIMEOUT_MS`        | Tempo máximo de cada revisão; ao estourar, salva sem ela            | `30000`                                           |
 | `POST_SEO_MODEL`                | Modelo do agente de SEO (resumo, meta description, slug e tags)     | `google/gemini-2.5-flash`                         |
 | `POST_SEO_TIMEOUT_MS`           | Tempo máximo da geração de SEO; ao estourar, salva sem os metadados | `20000`                                           |
+| `EDITORIAL_PLANNER_MODEL`       | Modelo do agente editor de pauta                                    | `google/gemini-2.5-flash`                         |
+| `EDITORIAL_IDEAS_TIMEOUT_MS`    | Tempo máximo da geração de pautas; ao estourar, responde `502`      | `60000`                                           |
 | `GOOGLE_API_KEY`                | Chave do Google AI Studio (modelos `google/*`)                      | —                                                 |
 | `GROQ_API_KEY`                  | Chave da Groq, se usar um modelo `groq/*`                           | —                                                 |
 | `DATABASE_URL`                  | Connection string do Postgres                                       | `postgres://blog:blog@localhost:5432/blog`        |
@@ -134,7 +138,7 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 }
 ```
 
-As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `POST /comments/:id/reply`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `POST /comments/:id/reply`, `DELETE /comments/:id`, `PUT /posts/:id/tags`, `DELETE /tags/:slug` e `POST /editorial/ideas`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 As rotas públicas de escrita têm rate limiting em memória, por IP: `POST /posts/:id/comments` aceita 5 requisições por minuto, e `POST`/`DELETE /posts/:id/likes` dividem uma cota de 30 por minuto. As respostas trazem os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Ao estourar a cota, a rota responde `429 { message: "Too Many Requests" }` com `Retry-After` (em segundos). Atrás de um proxy reverso, defina `TRUST_PROXY=true` para que o IP venha do `X-Forwarded-For`; sem isso, o header é ignorado, porque o cliente poderia forjá-lo. Como os contadores ficam na memória, cada instância da API tem os seus, e um restart zera todos.
 
@@ -501,6 +505,23 @@ Apaga a tag e a remove de todos os posts. Requer API key.
 | `200`  | `{ message: "Tag deleted" }` |
 | `403`  | API key ausente ou inválida  |
 | `404`  | Tag não encontrada           |
+
+### `POST /editorial/ideas`
+
+Pede ao agente `editorial-planner` sugestões de novos posts. É o primeiro agente com **tools**: em vez de receber tudo no prompt, ele consulta o blog sozinho com `getPopularPosts` (curtidas na janela e comentários), `listTags` e `searchPosts` (busca full-text, para não repetir temas já publicados). O campo `idea` de cada pauta pode ir direto para `POST /posts/draft`, e o rascunho passa pelo revisor como qualquer outro. Em `inspired_by` ficam só slugs que as tools de fato devolveram; os inventados pelo modelo são descartados. Requer API key.
+
+O body é opcional: `count` (1 a 10, padrão `5`), `days` (1 a 365, padrão `30`) e `focus` (tema desejado, até 200 caracteres).
+
+```bash
+curl -X POST http://localhost:8080/editorial/ideas   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json"   -d '{ "count": 3, "focus": "testes automatizados" }'
+```
+
+| Status | Quando                                                                           |
+| ------ | -------------------------------------------------------------------------------- |
+| `200`  | `{ data: { ideas: [{ title, idea, rationale, suggested_tags, inspired_by }] } }` |
+| `400`  | `count`, `days` ou `focus` inválido                                              |
+| `403`  | API key ausente ou inválida                                                      |
+| `502`  | O agente falhou ou passou de `EDITORIAL_IDEAS_TIMEOUT_MS`                        |
 
 ## Testes
 

@@ -134,7 +134,8 @@ export const openApiSpec = {
     { name: "Comments" },
     { name: "Likes" },
     { name: "Tags" },
-    { name: "Feed" }
+    { name: "Feed" },
+    { name: "Editorial" }
   ],
   paths: {
     "/posts": {
@@ -716,6 +717,50 @@ export const openApiSpec = {
           "502": errorResponse("O agente falhou ou estourou o tempo (`COMMENT_REPLY_TIMEOUT_MS`)")
         }
       }
+    },
+    "/editorial/ideas": {
+      post: {
+        tags: ["Editorial"],
+        summary: "Sugere pautas de novos posts",
+        description:
+          "O agente `editorial-planner` consulta o blog por tools (`getPopularPosts`, `listTags` e `searchPosts`) e sugere posts que aproveitam o engajamento dos leitores sem repetir temas já publicados. O campo `idea` de cada pauta pode ir direto para `POST /posts/draft`. Em `inspired_by` ficam só slugs que as tools de fato devolveram. Requer API key.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/EditorialIdeasBody" } }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Pautas sugeridas",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["data"],
+                  properties: {
+                    data: {
+                      type: "object",
+                      required: ["ideas"],
+                      properties: {
+                        ideas: {
+                          type: "array",
+                          items: { $ref: "#/components/schemas/EditorialIdea" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": validationErrorResponse("`count`, `days` ou `focus` inválido"),
+          "403": forbiddenResponse,
+          "500": errorResponse("Falha ao gerar as pautas"),
+          "502": errorResponse("O agente falhou ou estourou o tempo (`EDITORIAL_IDEAS_TIMEOUT_MS`)")
+        }
+      }
     }
   },
   components: {
@@ -982,6 +1027,59 @@ export const openApiSpec = {
                 }
               }
             }
+          }
+        }
+      },
+      EditorialIdeasBody: {
+        type: "object",
+        properties: {
+          count: {
+            type: "integer",
+            minimum: 1,
+            maximum: 10,
+            default: 5,
+            description: "Quantidade de pautas"
+          },
+          days: {
+            type: "integer",
+            minimum: 1,
+            maximum: 365,
+            default: 30,
+            description: "Janela, em dias, das curtidas consideradas"
+          },
+          focus: {
+            type: "string",
+            maxLength: 200,
+            description: "Tema desejado (opcional)",
+            example: "testes automatizados"
+          }
+        }
+      },
+      EditorialIdea: {
+        type: "object",
+        required: ["title", "idea", "rationale", "suggested_tags", "inspired_by"],
+        properties: {
+          title: { type: "string", example: "Testando streams no Node.js com node:test" },
+          idea: {
+            type: "string",
+            description: "Descrição do post, pronta para o body de `POST /posts/draft`",
+            example: "Um guia prático de como testar pipelines de streams com node:test e mocks."
+          },
+          rationale: {
+            type: "string",
+            example: "O post sobre streams é o mais curtido da semana e tem dúvidas sobre testes."
+          },
+          suggested_tags: {
+            type: "array",
+            maxItems: 3,
+            items: { type: "string" },
+            example: ["Node.js", "Testes"]
+          },
+          inspired_by: {
+            type: "array",
+            description: "Slugs dos posts que motivaram a pauta",
+            items: { type: "string" },
+            example: ["streams-no-nodejs"]
           }
         }
       },
