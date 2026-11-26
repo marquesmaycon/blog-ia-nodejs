@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { afterEach, beforeEach, describe, it } from "node:test"
 
-import type { Reply, Request } from "../../../src/http/app.ts"
-import { hasValidApiKey, requireApiKey } from "../../../src/http/auth.ts"
+import { HttpError, type Reply, type Request } from "../../../src/http/app.ts"
+import { assertApiKey, hasValidApiKey, requireApiKey } from "../../../src/http/auth.ts"
 
 function requestWith(authorization?: string) {
   return { headers: authorization === undefined ? {} : { authorization } } as Request<unknown>
@@ -95,4 +95,33 @@ describe("requireApiKey", () => {
       assert.deepEqual(sent, { status: 403, payload: { message: "Forbidden" } })
     })
   }
+})
+
+describe("assertApiKey", () => {
+  const originalApiKey = process.env.API_KEY
+
+  beforeEach(() => {
+    process.env.API_KEY = "secret"
+  })
+
+  afterEach(() => {
+    if (originalApiKey === undefined) delete process.env.API_KEY
+    else process.env.API_KEY = originalApiKey
+  })
+
+  it("não lança com a API key válida", () => {
+    assert.doesNotThrow(() => assertApiKey(requestWith("Bearer secret")))
+  })
+
+  it("lança HttpError 403 sem a API key", () => {
+    assert.throws(
+      () => assertApiKey(requestWith()),
+      (error) =>
+        error instanceof HttpError && error.statusCode === 403 && error.message === "Forbidden"
+    )
+  })
+
+  it("lança HttpError 403 com a API key inválida", () => {
+    assert.throws(() => assertApiKey(requestWith("Bearer wrong")), HttpError)
+  })
 })
