@@ -5,6 +5,9 @@ import { pool } from "../db/index.ts"
 // Espelha o CHECK da coluna comments.status (migration 002)
 export type CommentStatus = "pending" | "approved" | "rejected"
 
+// Espelha o CHECK da coluna comments.author_type (migration 010)
+export type CommentAuthorType = "reader" | "ai"
+
 export type Comment = {
   id: string
   post_id: string
@@ -13,15 +16,45 @@ export type Comment = {
   status: CommentStatus
   moderation_reason: string | null
   moderation_categories: string[]
+  // Comentário respondido (null nos comentários de primeiro nível)
+  parent_id: string | null
+  author_type: CommentAuthorType
   created_at: string
 }
 
-// O veredito da moderação é opcional: sem ele, valem os defaults da tabela (pendente, sem motivo)
+// O veredito da moderação e a resposta são opcionais: sem eles, valem os defaults da tabela
+// (pendente, sem motivo, comentário de leitor no primeiro nível)
 export type NewComment = Pick<Comment, "post_id" | "author_name" | "content"> &
-  Partial<Pick<Comment, "status" | "moderation_reason" | "moderation_categories">>
+  Partial<
+    Pick<
+      Comment,
+      "status" | "moderation_reason" | "moderation_categories" | "parent_id" | "author_type"
+    >
+  >
 
 export const COMMENT_COLUMNS =
-  "id, post_id, author_name, content, status, moderation_reason, moderation_categories, created_at"
+  "id, post_id, author_name, content, status, moderation_reason, moderation_categories, parent_id, author_type, created_at"
+
+export async function findCommentById(id: string): Promise<Comment | null> {
+  const { rows } = await pool.query<Comment>(
+    `SELECT ${COMMENT_COLUMNS} FROM comments WHERE id = $1`,
+    [id]
+  )
+
+  return rows[0] ?? null
+}
+
+// Já existe resposta da IA (em qualquer status) para o comentário?
+export async function hasAiReply(parentId: string): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM comments WHERE parent_id = $1 AND author_type = 'ai'
+     ) AS exists`,
+    [parentId]
+  )
+
+  return rows[0].exists
+}
 
 export async function findApprovedCommentsByPost(postId: string): Promise<Comment[]> {
   const { rows } = await pool.query<Comment>(
@@ -50,14 +83,27 @@ export async function insertComment({
   content,
   status = "pending",
   moderation_reason = null,
-  moderation_categories = []
+  moderation_categories = [],
+  parent_id = null,
+  author_type = "reader"
 }: NewComment): Promise<Comment> {
   const { rows } = await pool.query<Comment>(
     `INSERT INTO comments
-       (id, post_id, author_name, content, status, moderation_reason, moderation_categories)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (id, post_id, author_name, content, status, moderation_reason, moderation_categories,
+        parent_id, author_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING ${COMMENT_COLUMNS}`,
-    [nanoid(), post_id, author_name, content, status, moderation_reason, moderation_categories]
+    [
+      nanoid(),
+      post_id,
+      author_name,
+      content,
+      status,
+      moderation_reason,
+      moderation_categories,
+      parent_id,
+      author_type
+    ]
   )
 
   return rows[0]

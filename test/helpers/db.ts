@@ -66,14 +66,17 @@ export async function seedComment(
     status: "pending",
     moderation_reason: null,
     moderation_categories: [],
+    parent_id: null,
+    author_type: "reader",
     created_at: new Date().toISOString(),
     ...overrides
   }
 
   const { rows } = await pool.query<Comment>(
     `INSERT INTO comments
-       (id, post_id, author_name, content, status, moderation_reason, moderation_categories, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (id, post_id, author_name, content, status, moderation_reason, moderation_categories,
+        parent_id, author_type, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING ${COMMENT_COLUMNS}`,
     [
       comment.id,
@@ -83,6 +86,8 @@ export async function seedComment(
       comment.status,
       comment.moderation_reason,
       comment.moderation_categories,
+      comment.parent_id,
+      comment.author_type,
       comment.created_at
     ]
   )

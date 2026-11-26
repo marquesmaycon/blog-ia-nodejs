@@ -34,6 +34,8 @@ const comment: Comment = {
   status: "pending",
   moderation_reason: null,
   moderation_categories: [],
+  parent_id: null,
+  author_type: "reader",
   created_at: "2026-01-02T00:00:00.000Z"
 }
 
