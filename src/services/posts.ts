@@ -1,14 +1,12 @@
-import { z } from "zod"
-
-import { POST_WRITER_AGENT_ID } from "../mastra/agents/post-writer.ts"
 import { mastra } from "../mastra/index.ts"
+import { POST_DRAFTING_WORKFLOW_ID } from "../mastra/workflows/post-drafting.ts"
+import { insertPostWithReviews, type PostReview } from "../repositories/post-reviews.ts"
 import {
   approvePostById,
   findPostById,
   findPosts,
   findPublishedPostBySlug,
   findTakenSlugs,
-  insertPost,
   rejectPostById,
   updateDraftById,
   type Post,
@@ -16,11 +14,6 @@ import {
 } from "../repositories/posts.ts"
 import { readingTimeMinutes } from "../utils/reading-time.ts"
 import { slugify } from "../utils/slugify.ts"
-
-const generatedPostSchema = z.object({
-  title: z.string().min(1).describe("Título do post, curto e chamativo"),
-  content: z.string().min(1).describe("Corpo completo do post em Markdown")
-})
 
 const MAX_SLUG_LENGTH = 80
 // Inserts simultâneos podem escolher o mesmo slug; o UNIQUE barra e tentamos de novo
@@ -63,6 +56,9 @@ export async function listPosts({
 }
 
 export type PostContent = Pick<Post, "title" | "content">
+
+// O rascunho recém-criado com a última revisão da IA (null se o revisor falhou)
+export type PostDraft = Post & { review: PostReview | null }
 
 export type UpdatePostDraftResult =
   | { status: "updated"; post: Post }
@@ -120,17 +116,25 @@ export async function getPublishedPostBySlug(slug: string): Promise<Post | null>
   return findPublishedPostBySlug(slug)
 }
 
-export async function createPostDraft(idea: string): Promise<Post> {
-  const agent = mastra.getAgent(POST_WRITER_AGENT_ID)
-  const { object } = await agent.generate(`Ideia do post: ${idea}`, {
-    structuredOutput: { schema: generatedPostSchema }
-  })
+// Roda o workflow escrever → revisar → (reescrever) e grava o rascunho com as revisões
+export async function createPostDraft(idea: string): Promise<PostDraft> {
+  const run = await mastra.getWorkflow(POST_DRAFTING_WORKFLOW_ID).createRun()
+  const result = await run.start({ inputData: { idea } })
 
-  const reading_time_minutes = readingTimeMinutes(object.content)
+  if (result.status !== "success") {
+    throw new Error(`Workflow ${POST_DRAFTING_WORKFLOW_ID} terminou com status ${result.status}`, {
+      cause: result.status === "failed" ? result.error : undefined
+    })
+  }
 
-  return withUniqueSlug(object.title, undefined, (slug) =>
-    insertPost({ ...object, slug, reading_time_minutes })
+  const { title, content, reviews } = result.result
+  const reading_time_minutes = readingTimeMinutes(content)
+
+  const saved = await withUniqueSlug(title, undefined, (slug) =>
+    insertPostWithReviews({ title, content, slug, reading_time_minutes }, reviews)
   )
+
+  return { ...saved.post, review: saved.reviews.at(-1) ?? null }
 }
 
 // Só posts não aprovados são editáveis. Como ainda não têm URL pública,

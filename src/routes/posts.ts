@@ -3,6 +3,7 @@ import { z } from "zod"
 import type { App } from "../http/app.ts"
 import { requireApiKey } from "../http/auth.ts"
 import { sendValidationError } from "../http/validation.ts"
+import { getPostReviews } from "../services/post-reviews.ts"
 import {
   approvePost,
   createPostDraft,
@@ -104,6 +105,24 @@ export function registerPostRoutes(app: App) {
     } catch (error) {
       console.error("Falha ao buscar o post pelo slug:", error)
       return res.status(500).send({ message: "Failed to get post" })
+    }
+  })
+
+  // Dado editorial: as notas e críticas do revisor IA, para o admin decidir a aprovação
+  app.get("/posts/:id/review", async (req, res) => {
+    if (!requireApiKey(req, res)) return
+
+    try {
+      const reviews = await getPostReviews(req.params.id)
+
+      if (!reviews) {
+        return res.status(404).send({ message: "Post not found" })
+      }
+
+      return res.send({ data: reviews })
+    } catch (error) {
+      console.error("Falha ao buscar as revisões do post:", error)
+      return res.status(500).send({ message: "Failed to get post review" })
     }
   })
 

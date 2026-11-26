@@ -18,6 +18,10 @@ pool.on("error", (error) => {
   console.error("Erro em conexão ociosa do Postgres:", error.message)
 })
 
+// O pool ou o client de uma transação: repositórios que aceitam participar de uma
+// transação recebem este tipo e usam o `pool` como padrão
+export type Queryable = Pick<pg.Pool, "query">
+
 // Executa `fn` numa transação: COMMIT se resolver, ROLLBACK se lançar (e relança o erro).
 // Todas as queries da transação precisam usar o `client` recebido, não o `pool`.
 export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {

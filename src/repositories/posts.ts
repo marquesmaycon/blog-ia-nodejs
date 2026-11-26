@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
 
-import { pool } from "../db/index.ts"
+import { pool, type Queryable } from "../db/index.ts"
 
 export type PostTag = {
   name: string
@@ -137,13 +137,12 @@ export async function findTakenSlugs(base: string, excludeId?: string): Promise<
   return rows.map((row) => row.slug)
 }
 
-export async function insertPost({
-  title,
-  content,
-  slug,
-  reading_time_minutes
-}: NewPost): Promise<Post> {
-  const { rows } = await pool.query<Post>(
+// `client` permite gravar dentro de uma transação (ex.: junto com os reviews do rascunho)
+export async function insertPost(
+  { title, content, slug, reading_time_minutes }: NewPost,
+  client: Queryable = pool
+): Promise<Post> {
+  const { rows } = await client.query<Post>(
     `INSERT INTO posts (id, title, content, slug, reading_time_minutes)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING ${POST_COLUMNS}`,
