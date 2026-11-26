@@ -2,11 +2,8 @@ import { createTool } from "@mastra/core/tools"
 import { z } from "zod"
 
 import type { Post } from "../../domain/posts.ts"
-
-// Os repositórios são carregados só na execução: importar o pool do Postgres no topo faria
-// o registro do Mastra (src/mastra/index.ts) exigir DATABASE_URL, inclusive nos testes unitários.
-const loadPosts = () => import("../../repositories/posts.ts")
-const loadTags = () => import("../../repositories/tags.ts")
+import { findPopularPosts, findPosts } from "../../repositories/posts.ts"
+import { findTagsWithApprovedPosts } from "../../repositories/tags.ts"
 
 // Versão enxuta do post para o modelo: sem o conteúdo, que gastaria tokens à toa
 const postSummarySchema = z.object({
@@ -43,7 +40,6 @@ export const getPopularPosts = createTool({
   }),
   outputSchema: z.object({ posts: z.array(popularPostSchema) }),
   execute: async ({ days, limit }) => {
-    const { findPopularPosts } = await loadPosts()
     const posts = await findPopularPosts({ days, limit })
 
     return {
@@ -65,7 +61,6 @@ export const listTags = createTool({
     tags: z.array(z.object({ name: z.string(), slug: z.string(), posts_count: z.number() }))
   }),
   execute: async () => {
-    const { findTagsWithApprovedPosts } = await loadTags()
     return { tags: await findTagsWithApprovedPosts() }
   }
 })
@@ -80,7 +75,6 @@ export const searchPosts = createTool({
   }),
   outputSchema: z.object({ posts: z.array(postSummarySchema) }),
   execute: async ({ q, limit }) => {
-    const { findPosts } = await loadPosts()
     const { posts } = await findPosts({ approvedOnly: true, q }, { limit, offset: 0 })
 
     return { posts: posts.map(toSummary) }

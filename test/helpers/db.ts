@@ -1,4 +1,4 @@
-import { pool } from "../../src/db/index.ts"
+import { getPool } from "../../src/db/index.ts"
 import type { Comment } from "../../src/domain/comments.ts"
 import type { PostReview } from "../../src/domain/post-reviews.ts"
 import type { Post, PostTag } from "../../src/domain/posts.ts"
@@ -7,7 +7,7 @@ import { POST_REVIEW_COLUMNS } from "../../src/repositories/post-reviews.ts"
 import { POST_COLUMNS } from "../../src/repositories/posts.ts"
 import { slugify } from "../../src/utils/slugify.ts"
 
-export { pool }
+export const pool = getPool()
 
 // CASCADE limpa junto as tabelas que referenciam posts (comments, post_likes, post_tags,
 // post_reviews).

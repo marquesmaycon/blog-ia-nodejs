@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
 
-import { pool, withTransaction, type Queryable } from "../db/index.ts"
+import { getPool, withTransaction, type Queryable } from "../db/index.ts"
 import type { PostTag } from "../domain/posts.ts"
 import type { TagWithCount } from "../domain/tags.ts"
 
@@ -38,14 +38,16 @@ export async function replacePostTags(
 // Nomes de todas as tags, inclusive as que só estão em rascunhos. É o vocabulário que
 // o agente de SEO recebe para reaproveitar em vez de criar sinônimos.
 export async function findAllTagNames(): Promise<string[]> {
-  const { rows } = await pool.query<{ name: string }>("SELECT name FROM tags ORDER BY name ASC")
+  const { rows } = await getPool().query<{ name: string }>(
+    "SELECT name FROM tags ORDER BY name ASC"
+  )
 
   return rows.map((row) => row.name)
 }
 
 // Tags sem posts aprovados (ex.: só em rascunhos) ficam de fora
 export async function findTagsWithApprovedPosts(): Promise<TagWithCount[]> {
-  const { rows } = await pool.query<TagWithCount>(
+  const { rows } = await getPool().query<TagWithCount>(
     `SELECT tags.name, tags.slug, COUNT(*)::int AS posts_count
      FROM tags
      JOIN post_tags ON post_tags.tag_id = tags.id
@@ -60,7 +62,7 @@ export async function findTagsWithApprovedPosts(): Promise<TagWithCount[]> {
 
 // O ON DELETE CASCADE remove a tag de todos os posts
 export async function deleteTagBySlug(slug: string): Promise<boolean> {
-  const { rowCount } = await pool.query("DELETE FROM tags WHERE slug = $1", [slug])
+  const { rowCount } = await getPool().query("DELETE FROM tags WHERE slug = $1", [slug])
 
   return (rowCount ?? 0) > 0
 }

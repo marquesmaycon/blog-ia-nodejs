@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
 
-import { pool, withTransaction, type Queryable } from "../db/index.ts"
+import { getPool, withTransaction, type Queryable } from "../db/index.ts"
 import type { NewPostReview, PostReview } from "../domain/post-reviews.ts"
 import type { NewPost, Post, PostTag } from "../domain/posts.ts"
 import { findPostById, insertPost } from "./posts.ts"
@@ -56,7 +56,7 @@ export async function insertPostWithReviews(
 
 // Histórico de revisões do post, da primeira tentativa para a última
 export async function findPostReviews(postId: string): Promise<PostReview[]> {
-  const { rows } = await pool.query<PostReview>(
+  const { rows } = await getPool().query<PostReview>(
     `SELECT ${POST_REVIEW_COLUMNS} FROM post_reviews WHERE post_id = $1 ORDER BY attempt ASC`,
     [postId]
   )

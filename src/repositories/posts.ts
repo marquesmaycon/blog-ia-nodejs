@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid"
 
-import { pool, type Queryable } from "../db/index.ts"
+import { getPool, type Queryable } from "../db/index.ts"
 import type {
   DraftChanges,
   NewPost,
@@ -55,11 +55,11 @@ export async function findPosts(
 
   // Duas queries em vez de COUNT(*) OVER(): o total continua certo numa página além do fim
   const [page, count] = await Promise.all([
-    pool.query<Post>(
+    getPool().query<Post>(
       `SELECT ${POST_COLUMNS} FROM posts WHERE ${where} ORDER BY ${ORDER_BY} LIMIT $3 OFFSET $4`,
       [...filterParams, limit, offset]
     ),
-    pool.query<{ total: number }>(
+    getPool().query<{ total: number }>(
       `SELECT COUNT(*)::int AS total FROM posts WHERE ${where}`,
       filterParams
     )
@@ -69,7 +69,10 @@ export async function findPosts(
 }
 
 // `client` permite reler o post dentro de uma transação (ex.: depois de gravar as tags)
-export async function findPostById(id: string, client: Queryable = pool): Promise<Post | null> {
+export async function findPostById(
+  id: string,
+  client: Queryable = getPool()
+): Promise<Post | null> {
   const { rows } = await client.query<Post>(`SELECT ${POST_COLUMNS} FROM posts WHERE id = $1`, [id])
 
   return rows[0] ?? null
@@ -77,7 +80,7 @@ export async function findPostById(id: string, client: Queryable = pool): Promis
 
 // Só posts publicados: rascunhos e reprovados não têm URL pública
 export async function findPublishedPostBySlug(slug: string): Promise<Post | null> {
-  const { rows } = await pool.query<Post>(
+  const { rows } = await getPool().query<Post>(
     `SELECT ${POST_COLUMNS} FROM posts WHERE slug = $1 AND approved_at IS NOT NULL`,
     [slug]
   )
@@ -88,7 +91,7 @@ export async function findPublishedPostBySlug(slug: string): Promise<Post | null
 // Slugs já usados que colidem com `base`: ele mesmo e as variações "base-N".
 // `excludeId` ignora o próprio post, para a edição não colidir consigo mesma.
 export async function findTakenSlugs(base: string, excludeId?: string): Promise<string[]> {
-  const { rows } = await pool.query<{ slug: string }>(
+  const { rows } = await getPool().query<{ slug: string }>(
     `SELECT slug FROM posts
      WHERE (slug = $1 OR slug ~ ('^' || $2 || '-[0-9]+$'))
        AND ($3::text IS NULL OR id <> $3)`,
@@ -101,7 +104,7 @@ export async function findTakenSlugs(base: string, excludeId?: string): Promise<
 // `client` permite gravar dentro de uma transação (ex.: junto com os reviews do rascunho)
 export async function insertPost(
   { title, content, slug, reading_time_minutes, summary, meta_description }: NewPost,
-  client: Queryable = pool
+  client: Queryable = getPool()
 ): Promise<Post> {
   const { rows } = await client.query<Post>(
     `INSERT INTO posts (id, title, content, slug, reading_time_minutes, summary, meta_description)
@@ -119,7 +122,7 @@ export async function updateDraftById(
   id: string,
   { title, content, slug, reading_time_minutes, summary, meta_description }: DraftChanges
 ): Promise<Post | null> {
-  const { rows } = await pool.query<Post>(
+  const { rows } = await getPool().query<Post>(
     `UPDATE posts
      SET title = $2, content = $3, slug = $4, reading_time_minutes = $5,
        summary = $6, meta_description = $7
@@ -132,7 +135,7 @@ export async function updateDraftById(
 }
 
 export async function approvePostById(id: string): Promise<Post | null> {
-  const { rows } = await pool.query<Post>(
+  const { rows } = await getPool().query<Post>(
     `UPDATE posts
      SET approved_at = now(), published_at = now(), rejected_at = NULL
      WHERE id = $1
@@ -144,7 +147,7 @@ export async function approvePostById(id: string): Promise<Post | null> {
 }
 
 export async function rejectPostById(id: string): Promise<Post | null> {
-  const { rows } = await pool.query<Post>(
+  const { rows } = await getPool().query<Post>(
     `UPDATE posts
      SET rejected_at = now(), approved_at = NULL
      WHERE id = $1
@@ -168,7 +171,7 @@ export async function findPopularPosts({
   days: number
   limit: number
 }): Promise<PopularPost[]> {
-  const { rows } = await pool.query<PopularPost>(
+  const { rows } = await getPool().query<PopularPost>(
     `SELECT ${POST_COLUMNS}, COUNT(*)::int AS recent_likes
      FROM posts
      JOIN post_likes ON post_likes.post_id = posts.id
