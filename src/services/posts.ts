@@ -1,6 +1,6 @@
 import { isUniqueViolation } from "../db/errors.ts"
 import type { PostReview } from "../domain/post-reviews.ts"
-import type { Post, PostFilters } from "../domain/posts.ts"
+import { DEFAULT_PAGE_LIMIT, type Post, type PostFilters } from "../domain/posts.ts"
 import { mastra } from "../mastra/index.ts"
 import { POST_DRAFTING_WORKFLOW_ID } from "../mastra/workflows/post-drafting.ts"
 import { insertPostWithReviews } from "../repositories/post-reviews.ts"
@@ -21,9 +21,6 @@ import { toUniqueTags } from "./tags.ts"
 const MAX_SLUG_LENGTH = 80
 // Inserts simultâneos podem escolher o mesmo slug; o UNIQUE barra e tentamos de novo
 const SLUG_ATTEMPTS = 3
-
-export const DEFAULT_PAGE_LIMIT = 10
-export const MAX_PAGE_LIMIT = 50
 
 export type ListPostsOptions = PostFilters & {
   includeAll?: boolean

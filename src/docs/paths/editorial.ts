@@ -1,4 +1,6 @@
+import { ideasBodySchema } from "../../routes/editorial.schemas.ts"
 import { errorResponse, forbiddenResponse, validationErrorResponse } from "../responses.ts"
+import { jsonBody } from "../zod.ts"
 
 export const editorialPaths = {
   "/editorial/ideas": {
@@ -8,12 +10,7 @@ export const editorialPaths = {
       description:
         "O agente `editorial-planner` consulta o blog por tools (`getPopularPosts`, `listTags` e `searchPosts`) e sugere posts que aproveitam o engajamento dos leitores sem repetir temas já publicados. O campo `idea` de cada pauta pode ir direto para `POST /posts/draft`. Em `inspired_by` ficam só slugs que as tools de fato devolveram. Requer API key.",
       security: [{ bearerAuth: [] }],
-      requestBody: {
-        required: false,
-        content: {
-          "application/json": { schema: { $ref: "#/components/schemas/EditorialIdeasBody" } }
-        }
-      },
+      requestBody: jsonBody(ideasBodySchema, { required: false }),
       responses: {
         "200": {
           description: "Pautas sugeridas",

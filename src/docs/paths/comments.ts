@@ -1,3 +1,4 @@
+import { createCommentBodySchema, listCommentsQuerySchema } from "../../routes/comments.schemas.ts"
 import { commentIdParam, idParam } from "../params.ts"
 import {
   commentListResponse,
@@ -8,6 +9,7 @@ import {
   tooManyRequestsResponse,
   validationErrorResponse
 } from "../responses.ts"
+import { jsonBody, queryParams } from "../zod.ts"
 
 export const commentPaths = {
   "/posts/{id}/comments": {
@@ -28,26 +30,7 @@ export const commentPaths = {
       description:
         "Só aceita comentários em posts aprovados. Antes de gravar, o agente moderador (IA) avalia o comentário no contexto do post: `approve` publica na hora (`approved`, mensagem `Comment published`), `reject` reprova com motivo e categorias (`rejected`, `Comment rejected`) e `review` deixa para um humano (`pending`, `Comment awaiting moderation`). Se a IA falhar ou estourar o tempo, o comentário fica `pending`. Limite de 5 requisições por minuto por IP.",
       parameters: [idParam],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["author_name", "content"],
-              properties: {
-                author_name: { type: "string", minLength: 1, maxLength: 80, example: "Ana" },
-                content: {
-                  type: "string",
-                  minLength: 1,
-                  maxLength: 2000,
-                  example: "Ótimo post, obrigado!"
-                }
-              }
-            }
-          }
-        }
-      },
+      requestBody: jsonBody(createCommentBodySchema),
       responses: {
         "201": commentResponse("Comentário criado com o status decidido pelo moderador"),
         "400": validationErrorResponse(
@@ -65,18 +48,7 @@ export const commentPaths = {
       summary: "Lista os comentários por status",
       description:
         "Fila de moderação, do mais antigo para o mais recente. Sem `status`, lista os pendentes. Requer API key.",
-      parameters: [
-        {
-          name: "status",
-          in: "query",
-          required: false,
-          schema: {
-            type: "string",
-            enum: ["pending", "approved", "rejected"],
-            default: "pending"
-          }
-        }
-      ],
+      parameters: queryParams(listCommentsQuerySchema),
       security: [{ bearerAuth: [] }],
       responses: {
         "200": commentListResponse("Comentários com o status informado"),

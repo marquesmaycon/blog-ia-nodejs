@@ -1,6 +1,4 @@
-import { z } from "zod"
-
-import { COMMENT_STATUSES, type CommentStatus } from "../domain/comments.ts"
+import type { CommentStatus } from "../domain/comments.ts"
 import type { App } from "../http/app.ts"
 import { assertApiKey } from "../http/auth.ts"
 import { HttpError, notFound } from "../http/errors.ts"
@@ -14,16 +12,7 @@ import {
   listCommentsByStatus,
   listPostComments
 } from "../services/comments.ts"
-
-const createCommentBodySchema = z.object({
-  author_name: z.string().trim().min(1).max(80),
-  content: z.string().trim().min(1).max(2000)
-})
-
-// Objeto (e não o enum solto) para o erro apontar o campo "status"
-const listCommentsQuerySchema = z.object({
-  status: z.enum(COMMENT_STATUSES).default("pending")
-})
+import { createCommentBodySchema, listCommentsQuerySchema } from "./comments.schemas.ts"
 
 // A mensagem do 201 conta ao leitor o que o moderador decidiu
 const CREATED_MESSAGES: Record<CommentStatus, string> = {

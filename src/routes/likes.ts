@@ -1,22 +1,9 @@
-import { z } from "zod"
-
 import type { App, Request } from "../http/app.ts"
 import { createRateLimiter, type RateLimitOptions } from "../http/rate-limit.ts"
 import { notFound } from "../http/errors.ts"
 import { parseHeaders, parseQuery } from "../http/validation.ts"
 import { likePost, listPopularPosts, unlikePost } from "../services/likes.ts"
-
-// Gerado pelo cliente (ex.: um nanoid guardado no navegador); identifica o visitante sem login
-const visitorHeaderSchema = z.object({
-  "x-visitor-id": z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{8,64}$/, "Must be 8-64 characters: letters, digits, '_' or '-'")
-})
-
-const popularPostsQuerySchema = z.object({
-  days: z.coerce.number().int().min(1).max(365).default(7),
-  limit: z.coerce.number().int().min(1).max(50).default(10)
-})
+import { popularPostsQuerySchema, visitorHeaderSchema } from "./likes.schemas.ts"
 
 function parseVisitorId(req: Request<unknown>): string {
   return parseHeaders(req, visitorHeaderSchema)["x-visitor-id"]

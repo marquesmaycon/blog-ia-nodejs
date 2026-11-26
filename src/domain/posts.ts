@@ -52,3 +52,7 @@ export type PopularPost = Post & {
   // Curtidas recebidas dentro da janela consultada
   recent_likes: number
 }
+
+// Paginação de GET /posts: a rota valida o limite e o service usa o padrão
+export const DEFAULT_PAGE_LIMIT = 10
+export const MAX_PAGE_LIMIT = 50

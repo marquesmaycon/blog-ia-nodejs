@@ -77,24 +77,6 @@ export const schemas = {
       }
     }
   },
-  UpdatePostBody: {
-    type: "object",
-    required: ["title", "content"],
-    properties: {
-      title: { type: "string", minLength: 1, maxLength: 200, example: "Novo título" },
-      content: { type: "string", minLength: 1, description: "Conteúdo em Markdown" },
-      summary: {
-        type: ["string", "null"],
-        maxLength: 300,
-        description: "Opcional: ausente mantém o atual; null ou texto vazio limpa"
-      },
-      meta_description: {
-        type: ["string", "null"],
-        maxLength: 160,
-        description: "Opcional: ausente mantém o atual; null ou texto vazio limpa"
-      }
-    }
-  },
   Tag: {
     type: "object",
     required: ["name", "slug"],
@@ -256,31 +238,6 @@ export const schemas = {
             }
           }
         }
-      }
-    }
-  },
-  EditorialIdeasBody: {
-    type: "object",
-    properties: {
-      count: {
-        type: "integer",
-        minimum: 1,
-        maximum: 10,
-        default: 5,
-        description: "Quantidade de pautas"
-      },
-      days: {
-        type: "integer",
-        minimum: 1,
-        maximum: 365,
-        default: 30,
-        description: "Janela, em dias, das curtidas consideradas"
-      },
-      focus: {
-        type: "string",
-        maxLength: 200,
-        description: "Tema desejado (opcional)",
-        example: "testes automatizados"
       }
     }
   },

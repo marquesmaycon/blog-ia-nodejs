@@ -1,24 +1,9 @@
-import { z } from "zod"
-
 import type { App } from "../http/app.ts"
 import { assertApiKey } from "../http/auth.ts"
 import { notFound } from "../http/errors.ts"
 import { parseBody } from "../http/validation.ts"
 import { deleteTag, listTags, setPostTags } from "../services/tags.ts"
-import { slugify } from "../utils/slugify.ts"
-
-const setPostTagsBodySchema = z.object({
-  tags: z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1)
-        .max(40)
-        .refine((name) => slugify(name) !== "", "Must contain letters or digits")
-    )
-    .max(10)
-})
+import { setPostTagsBodySchema } from "./tags.schemas.ts"
 
 export function registerTagRoutes(app: App) {
   app.get("/tags", async () => ({ data: await listTags() }), {

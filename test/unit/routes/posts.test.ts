@@ -36,10 +36,7 @@ const reviewServices = {
   getPostReviews: mock.fn(async (_id: string): Promise<PostReviewSummary | null> => null)
 }
 
-// As constantes de paginação também saem do módulo mockado, então entram nos exports
-mock.module(import.meta.resolve("../../../src/services/posts.ts"), {
-  exports: { ...services, DEFAULT_PAGE_LIMIT: 10, MAX_PAGE_LIMIT: 50 }
-})
+mock.module(import.meta.resolve("../../../src/services/posts.ts"), { exports: services })
 
 mock.module(import.meta.resolve("../../../src/services/post-reviews.ts"), {
   exports: reviewServices

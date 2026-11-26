@@ -1,10 +1,12 @@
-import { idParam, visitorIdHeader } from "../params.ts"
+import { popularPostsQuerySchema, visitorHeaderSchema } from "../../routes/likes.schemas.ts"
+import { idParam } from "../params.ts"
 import {
   errorResponse,
   likeStatusResponse,
   tooManyRequestsResponse,
   validationErrorResponse
 } from "../responses.ts"
+import { headerParams, queryParams } from "../zod.ts"
 
 export const likePaths = {
   "/posts/popular": {
@@ -13,22 +15,7 @@ export const likePaths = {
       summary: "Lista os posts mais curtidos",
       description:
         "Ranking dos posts aprovados pelas curtidas recebidas nos últimos `days` dias. Posts sem curtidas na janela ficam de fora. Empates são desfeitos pelo mais recente.",
-      parameters: [
-        {
-          name: "days",
-          in: "query",
-          required: false,
-          description: "Tamanho da janela, em dias",
-          schema: { type: "integer", minimum: 1, maximum: 365, default: 7 }
-        },
-        {
-          name: "limit",
-          in: "query",
-          required: false,
-          description: "Quantidade máxima de posts",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 }
-        }
-      ],
+      parameters: queryParams(popularPostsQuerySchema),
       responses: {
         "200": {
           description: "Posts mais curtidos na janela",
@@ -55,7 +42,7 @@ export const likePaths = {
       summary: "Curte um post",
       description:
         "Idempotente: cada visitante curte um post uma única vez. Só funciona para posts aprovados. Divide com o DELETE um limite de 30 requisições por minuto por IP.",
-      parameters: [idParam, visitorIdHeader],
+      parameters: [idParam, ...headerParams(visitorHeaderSchema)],
       responses: {
         "201": likeStatusResponse("Curtida registrada"),
         "200": likeStatusResponse("O visitante já tinha curtido o post"),
@@ -70,7 +57,7 @@ export const likePaths = {
       summary: "Remove a curtida de um post",
       description:
         "Idempotente: responde 200 mesmo que o visitante não tivesse curtido. Só funciona para posts aprovados. Divide com o POST um limite de 30 requisições por minuto por IP.",
-      parameters: [idParam, visitorIdHeader],
+      parameters: [idParam, ...headerParams(visitorHeaderSchema)],
       responses: {
         "200": likeStatusResponse("Curtida removida"),
         "400": validationErrorResponse("`X-Visitor-Id` ausente ou inválido"),

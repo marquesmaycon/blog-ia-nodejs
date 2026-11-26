@@ -1,5 +1,3 @@
-import { z } from "zod"
-
 import type { App } from "../http/app.ts"
 import { assertApiKey } from "../http/auth.ts"
 import { badRequest, conflict, notFound } from "../http/errors.ts"
@@ -8,57 +6,18 @@ import { getPostReviews } from "../services/post-reviews.ts"
 import {
   approvePost,
   createPostDraft,
-  DEFAULT_PAGE_LIMIT,
   getPost,
   getPublishedPostBySlug,
   listPosts,
-  MAX_PAGE_LIMIT,
   rejectPost,
   updatePostDraft
 } from "../services/posts.ts"
-import { META_DESCRIPTION_MAX_LENGTH, SUMMARY_MAX_LENGTH } from "../utils/seo.ts"
-
-const createPostDraftBodySchema = z.object({
-  idea: z.string().trim().min(1)
-})
-
-const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-
-// Texto vazio (ou só espaços) limpa o campo, como enviar null; ausente mantém o atual
-const optionalSeoText = (maxLength: number) =>
-  z
-    .string()
-    .trim()
-    .max(maxLength)
-    .transform((value) => value || null)
-    .nullable()
-    .optional()
-
-const updatePostBodySchema = z.object({
-  title: z.string().trim().min(1).max(200),
-  content: z.string().trim().min(1),
-  summary: optionalSeoText(SUMMARY_MAX_LENGTH),
-  meta_description: optionalSeoText(META_DESCRIPTION_MAX_LENGTH)
-})
-
-const postSlugSchema = z
-  .string()
-  .max(100)
-  .regex(SLUG_PATTERN, "Must be a post slug (e.g. 'testes-com-node')")
-
-// O filtro usa o slug (ex.: "node-js"), o mesmo que aparece em post.tags[].slug
-const listPostsQuerySchema = z.object({
-  tag: z.string().max(50).regex(SLUG_PATTERN, "Must be a tag slug (e.g. 'node-js')").optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
-  // "q=" ou só espaços contam como busca ausente
-  q: z
-    .string()
-    .trim()
-    .max(200)
-    .optional()
-    .transform((value) => value || undefined)
-})
+import {
+  createPostDraftBodySchema,
+  listPostsQuerySchema,
+  postSlugSchema,
+  updatePostBodySchema
+} from "./posts.schemas.ts"
 
 export function registerPostRoutes(app: App) {
   app.get(

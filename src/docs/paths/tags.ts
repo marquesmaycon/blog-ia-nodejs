@@ -1,3 +1,4 @@
+import { setPostTagsBodySchema } from "../../routes/tags.schemas.ts"
 import { idParam, tagSlugParam } from "../params.ts"
 import {
   errorResponse,
@@ -6,6 +7,7 @@ import {
   postResponse,
   validationErrorResponse
 } from "../responses.ts"
+import { jsonBody } from "../zod.ts"
 
 export const tagPaths = {
   "/posts/{id}/tags": {
@@ -16,30 +18,7 @@ export const tagPaths = {
         "Cria na hora as tags que ainda não existem e substitui o conjunto atual; lista vazia remove todas. Nomes com o mesmo slug viram uma tag só. Funciona em qualquer status do post. Requer API key.",
       parameters: [idParam],
       security: [{ bearerAuth: [] }],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["tags"],
-              properties: {
-                tags: {
-                  type: "array",
-                  maxItems: 10,
-                  items: {
-                    type: "string",
-                    minLength: 1,
-                    maxLength: 40,
-                    description: "Precisa ter pelo menos uma letra ou dígito"
-                  },
-                  example: ["Node.js", "IA"]
-                }
-              }
-            }
-          }
-        }
-      },
+      requestBody: jsonBody(setPostTagsBodySchema),
       responses: {
         "200": postResponse("Tags do post atualizadas", true),
         "400": validationErrorResponse("`tags` ausente, não é lista ou tem tag inválida"),
