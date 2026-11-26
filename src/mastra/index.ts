@@ -2,6 +2,7 @@ import { Mastra } from "@mastra/core/mastra"
 
 import { COMMENT_MODERATOR_AGENT_ID, commentModerator } from "./agents/comment-moderator.ts"
 import { COMMENT_REPLIER_AGENT_ID, commentReplier } from "./agents/comment-replier.ts"
+import { EDITORIAL_PLANNER_AGENT_ID, editorialPlanner } from "./agents/editorial-planner.ts"
 import { POST_REVIEWER_AGENT_ID, postReviewer } from "./agents/post-reviewer.ts"
 import { POST_SEO_AGENT_ID, postSeo } from "./agents/post-seo.ts"
 import { POST_WRITER_AGENT_ID, postWriter } from "./agents/post-writer.ts"
@@ -13,7 +14,8 @@ export const mastra = new Mastra({
     [COMMENT_MODERATOR_AGENT_ID]: commentModerator,
     [COMMENT_REPLIER_AGENT_ID]: commentReplier,
     [POST_REVIEWER_AGENT_ID]: postReviewer,
-    [POST_SEO_AGENT_ID]: postSeo
+    [POST_SEO_AGENT_ID]: postSeo,
+    [EDITORIAL_PLANNER_AGENT_ID]: editorialPlanner
   },
   workflows: {
     [POST_DRAFTING_WORKFLOW_ID]: postDraftingWorkflow
