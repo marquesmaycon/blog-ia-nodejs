@@ -216,7 +216,7 @@ export const openApiSpec = {
         tags: ["Posts"],
         summary: "Gera um rascunho de post a partir de uma ideia",
         description:
-          "Roda o workflow `post-drafting`: o agente redator escreve, o revisor dá uma nota de 0 a 10 e, abaixo de `POST_REVIEW_MIN_SCORE` (padrão 7), o redator reescreve com o feedback, até `POST_REVIEW_MAX_ATTEMPTS` (padrão 3) tentativas. A resposta pode levar vários ciclos de LLM. Se o revisor falhar, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). As revisões ficam em `GET /posts/{id}/review`. Requer API key.",
+          "Roda o workflow `post-drafting`: o agente redator escreve, o revisor dá uma nota de 0 a 10 e, abaixo de `POST_REVIEW_MIN_SCORE` (padrão 7), o redator reescreve com o feedback, até `POST_REVIEW_MAX_ATTEMPTS` (padrão 3) tentativas. A resposta pode levar vários ciclos de LLM. Se o revisor falhar, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). As revisões ficam em `GET /posts/{id}/review`. Por fim, o agente `post-seo` gera `summary`, `meta_description`, o `slug` (ainda sujeito ao sufixo de colisão) e até 5 tags, reaproveitando as que já existem; as tags são aplicadas ao rascunho. Se o agente de SEO falhar, o rascunho é salvo com o slug do título, sem tags e com os metadados nulos. Requer API key.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -371,7 +371,7 @@ export const openApiSpec = {
         tags: ["Posts"],
         summary: "Edita um rascunho",
         description:
-          "Substitui título e conteúdo de um post ainda não aprovado (rascunho ou reprovado). Recalcula `reading_time_minutes` e, se o título mudou, regera o `slug`. Requer API key.",
+          "Substitui título e conteúdo de um post ainda não aprovado (rascunho ou reprovado) e, opcionalmente, `summary` e `meta_description`. Recalcula `reading_time_minutes` e, se o título mudou, regera o `slug`. Requer API key.",
         parameters: [idParam],
         security: [{ bearerAuth: [] }],
         requestBody: {
@@ -708,6 +708,8 @@ export const openApiSpec = {
           "slug",
           "title",
           "content",
+          "summary",
+          "meta_description",
           "reading_time_minutes",
           "published_at",
           "approved_at",
@@ -725,6 +727,19 @@ export const openApiSpec = {
           },
           title: { type: "string", example: "Título do post" },
           content: { type: "string", description: "Conteúdo em Markdown" },
+          summary: {
+            type: ["string", "null"],
+            maxLength: 300,
+            description:
+              "Resumo gerado pelo agente de SEO, usado no RSS; null em posts antigos ou se o agente falhou",
+            example: "Como processar arquivos grandes sem estourar a memória."
+          },
+          meta_description: {
+            type: ["string", "null"],
+            maxLength: 160,
+            description: "Descrição para buscadores, gerada pelo agente de SEO",
+            example: "Aprenda a usar streams no Node.js."
+          },
           reading_time_minutes: {
             type: "integer",
             minimum: 1,
@@ -753,7 +768,17 @@ export const openApiSpec = {
         required: ["title", "content"],
         properties: {
           title: { type: "string", minLength: 1, maxLength: 200, example: "Novo título" },
-          content: { type: "string", minLength: 1, description: "Conteúdo em Markdown" }
+          content: { type: "string", minLength: 1, description: "Conteúdo em Markdown" },
+          summary: {
+            type: ["string", "null"],
+            maxLength: 300,
+            description: "Opcional: ausente mantém o atual; null ou texto vazio limpa"
+          },
+          meta_description: {
+            type: ["string", "null"],
+            maxLength: 160,
+            description: "Opcional: ausente mantém o atual; null ou texto vazio limpa"
+          }
         }
       },
       Tag: {

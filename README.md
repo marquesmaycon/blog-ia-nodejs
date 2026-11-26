@@ -7,7 +7,7 @@ API de blog em que os posts são escritos por IA. Você envia uma ideia, um agen
 - **Node.js 26**, que executa TypeScript nativamente (sem etapa de transpilação)
 - Servidor HTTP próprio sobre `node:http` ([src/http/app.ts](src/http/app.ts)), sem framework
 - **PostgreSQL 17** com `pg` e migrations via `postgrator-cli`
-- **Mastra** (`@mastra/core`) para os agentes redator, revisor e moderador de comentários, e para o workflow que encadeia redator e revisor; os modelos são configuráveis (Gemini por padrão)
+- **Mastra** (`@mastra/core`) para os agentes redator, revisor, de SEO e moderador de comentários, e para o workflow que encadeia redator, revisor e SEO; os modelos são configuráveis (Gemini por padrão)
 - **Zod** para validação
 - Qualidade: `oxlint`, `oxfmt`, `commitlint` (Conventional Commits) e hooks git com `lefthook`
 
@@ -31,11 +31,13 @@ src/
 ├── repositories/          # acesso ao Postgres (posts, post_reviews, comments, likes, tags)
 ├── utils/
 │   ├── slugify.ts         # gera slugs ASCII (ex.: "Node.js" -> "node-js")
-│   └── reading-time.ts    # estimativa de tempo de leitura (200 palavras/min)
+│   ├── reading-time.ts    # estimativa de tempo de leitura (200 palavras/min)
+│   ├── truncate.ts        # corta texto no limite com reticências
+│   └── seo.ts             # limites de summary e meta_description
 ├── mastra/
 │   ├── index.ts           # instância Mastra (registra agentes e workflows)
-│   ├── agents/            # post-writer, post-reviewer e comment-moderator
-│   └── workflows/         # post-drafting: escrever → revisar → reescrever
+│   ├── agents/            # post-writer, post-reviewer, post-seo e comment-moderator
+│   └── workflows/         # post-drafting: escrever → revisar → reescrever → SEO
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
     └── migrations/        # migrations SQL (postgrator)
@@ -72,24 +74,26 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 
 ### Variáveis de ambiente
 
-| Variável                        | Descrição                                                          | Padrão                                            |
-| ------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------- |
-| `API_HOST`                      | Host em que o servidor escuta                                      | `localhost` (no Docker: `0.0.0.0`)                |
-| `API_PORT`                      | Porta do servidor                                                  | `8080`                                            |
-| `API_PROTOCOL`                  | Usado apenas no log de inicialização                               | `http`                                            |
-| `API_KEY`                       | Bearer token das rotas administrativas (ver Endpoints)             | vazio, ou seja, o acesso protegido fica bloqueado |
-| `SITE_URL`                      | URL pública do blog, usada nos links do RSS                        | `API_PROTOCOL://API_HOST:API_PORT`                |
-| `TRUST_PROXY`                   | `true` para o rate limiting usar o IP do `X-Forwarded-For`         | `false`, ou seja, usa o IP da conexão             |
-| `POST_WRITER_MODEL`             | Modelo do agente no formato `provedor/modelo` do Mastra            | `google/gemini-2.5-flash`                         |
-| `COMMENT_MODERATOR_MODEL`       | Modelo do agente moderador de comentários                          | `google/gemini-2.5-flash`                         |
-| `COMMENT_MODERATION_TIMEOUT_MS` | Tempo máximo da moderação; ao estourar, o comentário fica pendente | `10000`                                           |
-| `POST_REVIEWER_MODEL`           | Modelo do agente revisor de rascunhos                              | `google/gemini-2.5-flash`                         |
-| `POST_REVIEW_MIN_SCORE`         | Nota mínima (0 a 10) para o rascunho não ser reescrito             | `7`                                               |
-| `POST_REVIEW_MAX_ATTEMPTS`      | Máximo de versões escritas por rascunho                            | `3`                                               |
-| `POST_REVIEW_TIMEOUT_MS`        | Tempo máximo de cada revisão; ao estourar, salva sem ela           | `30000`                                           |
-| `GOOGLE_API_KEY`                | Chave do Google AI Studio (modelos `google/*`)                     | —                                                 |
-| `GROQ_API_KEY`                  | Chave da Groq, se usar um modelo `groq/*`                          | —                                                 |
-| `DATABASE_URL`                  | Connection string do Postgres                                      | `postgres://blog:blog@localhost:5432/blog`        |
+| Variável                        | Descrição                                                           | Padrão                                            |
+| ------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------- |
+| `API_HOST`                      | Host em que o servidor escuta                                       | `localhost` (no Docker: `0.0.0.0`)                |
+| `API_PORT`                      | Porta do servidor                                                   | `8080`                                            |
+| `API_PROTOCOL`                  | Usado apenas no log de inicialização                                | `http`                                            |
+| `API_KEY`                       | Bearer token das rotas administrativas (ver Endpoints)              | vazio, ou seja, o acesso protegido fica bloqueado |
+| `SITE_URL`                      | URL pública do blog, usada nos links do RSS                         | `API_PROTOCOL://API_HOST:API_PORT`                |
+| `TRUST_PROXY`                   | `true` para o rate limiting usar o IP do `X-Forwarded-For`          | `false`, ou seja, usa o IP da conexão             |
+| `POST_WRITER_MODEL`             | Modelo do agente no formato `provedor/modelo` do Mastra             | `google/gemini-2.5-flash`                         |
+| `COMMENT_MODERATOR_MODEL`       | Modelo do agente moderador de comentários                           | `google/gemini-2.5-flash`                         |
+| `COMMENT_MODERATION_TIMEOUT_MS` | Tempo máximo da moderação; ao estourar, o comentário fica pendente  | `10000`                                           |
+| `POST_REVIEWER_MODEL`           | Modelo do agente revisor de rascunhos                               | `google/gemini-2.5-flash`                         |
+| `POST_REVIEW_MIN_SCORE`         | Nota mínima (0 a 10) para o rascunho não ser reescrito              | `7`                                               |
+| `POST_REVIEW_MAX_ATTEMPTS`      | Máximo de versões escritas por rascunho                             | `3`                                               |
+| `POST_REVIEW_TIMEOUT_MS`        | Tempo máximo de cada revisão; ao estourar, salva sem ela            | `30000`                                           |
+| `POST_SEO_MODEL`                | Modelo do agente de SEO (resumo, meta description, slug e tags)     | `google/gemini-2.5-flash`                         |
+| `POST_SEO_TIMEOUT_MS`           | Tempo máximo da geração de SEO; ao estourar, salva sem os metadados | `20000`                                           |
+| `GOOGLE_API_KEY`                | Chave do Google AI Studio (modelos `google/*`)                      | —                                                 |
+| `GROQ_API_KEY`                  | Chave da Groq, se usar um modelo `groq/*`                           | —                                                 |
+| `DATABASE_URL`                  | Connection string do Postgres                                       | `postgres://blog:blog@localhost:5432/blog`        |
 
 ### Scripts
 
@@ -142,6 +146,8 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
   "slug": "titulo-do-post",
   "title": "Título do post",
   "content": "Conteúdo em **Markdown**...",
+  "summary": "Como processar arquivos grandes sem estourar a memória.",
+  "meta_description": "Aprenda a usar streams no Node.js.",
   "reading_time_minutes": 4,
   "published_at": "2026-11-19T12:00:00.000Z",
   "approved_at": "2026-11-19T12:00:00.000Z",
@@ -155,7 +161,9 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
 }
 ```
 
-O `slug` é único e gerado do título. Títulos repetidos ganham sufixo (`-2`, `-3`...) e, quando o título não tem letras nem dígitos, o slug vira `post`. O `reading_time_minutes` é estimado a 200 palavras por minuto, com mínimo de 1. Os dois são gravados ao criar o post e recalculados ao editar.
+`summary` e `meta_description` são gerados pelo agente de SEO na criação do rascunho e ficam `null` nos posts antigos ou quando o agente falha.
+
+O `slug` é único e gerado do título (ou sugerido pelo agente de SEO, ver `POST /posts/draft`). Títulos repetidos ganham sufixo (`-2`, `-3`...) e, quando o título não tem letras nem dígitos, o slug vira `post`. O `reading_time_minutes` é estimado a 200 palavras por minuto, com mínimo de 1. Os dois são gravados ao criar o post e recalculados ao editar.
 
 `likes_count`, `comments_count` e `tags` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados, e `tags` vem ordenado pelo nome.
 
@@ -168,8 +176,9 @@ Gera um post a partir de uma ideia e o salva como rascunho. A geração é o wor
 1. O agente `post-writer` escreve o post.
 2. O agente `post-reviewer` dá uma nota de 0 a 10 e lista `issues` e `suggestions`.
 3. Abaixo de `POST_REVIEW_MIN_SCORE`, o redator reescreve com esse feedback e o revisor avalia de novo, até `POST_REVIEW_MAX_ATTEMPTS` versões.
+4. O agente `post-seo` gera, para a versão final, `summary` (até 300 caracteres), `meta_description` (até 160), uma sugestão de `slug` e até 5 tags. O prompt leva as tags já cadastradas para o agente reaproveitá-las em vez de criar sinônimos.
 
-O post e todas as revisões são gravados juntos, numa transação. A resposta traz a última revisão em `data.review`, e o histórico completo fica em `GET /posts/:id/review`. Como podem ser vários ciclos de LLM, a requisição demora mais que uma geração simples. Se o revisor falhar ou estourar `POST_REVIEW_TIMEOUT_MS`, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). Se o redator falhar, nada é gravado.
+O post, todas as revisões e as tags sugeridas são gravados juntos, numa transação. O slug da IA passa pelo mesmo `slugify` e pela mesma checagem de colisão que o título passaria. Se o agente de SEO falhar ou estourar `POST_SEO_TIMEOUT_MS`, o rascunho é salvo com o slug do título, sem tags e com `summary`/`meta_description` nulos; o admin pode ajustar as tags com `PUT /posts/:id/tags` e os metadados com `PUT /posts/:id`. A resposta traz a última revisão em `data.review`, e o histórico completo fica em `GET /posts/:id/review`. Como podem ser vários ciclos de LLM, a requisição demora mais que uma geração simples. Se o revisor falhar ou estourar `POST_REVIEW_TIMEOUT_MS`, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). Se o redator falhar, nada é gravado.
 
 ```bash
 curl -X POST http://localhost:8080/posts/draft \
@@ -246,7 +255,7 @@ curl http://localhost:8080/posts/slug/titulo-do-post
 
 ### `PUT /posts/:id`
 
-Edita o título e o conteúdo de um post ainda **não aprovado** (rascunho ou reprovado). Os dois campos são obrigatórios. O `reading_time_minutes` é recalculado e, se o título mudou, o `slug` é regerado, o que é seguro porque o post ainda não tem URL pública. Depois de aprovado, o post não pode mais ser editado.
+Edita o título e o conteúdo de um post ainda **não aprovado** (rascunho ou reprovado). Os dois campos são obrigatórios. `summary` (até 300 caracteres) e `meta_description` (até 160) são opcionais: ausentes, mantêm o valor atual; `null` ou texto vazio limpam o campo. O `reading_time_minutes` é recalculado e, se o título mudou, o `slug` é regerado, o que é seguro porque o post ainda não tem URL pública. Depois de aprovado, o post não pode mais ser editado.
 
 ```bash
 curl -X PUT http://localhost:8080/posts/<id> \
@@ -265,7 +274,7 @@ curl -X PUT http://localhost:8080/posts/<id> \
 
 ### `GET /feed.xml`
 
-Feed RSS 2.0 com os 20 posts aprovados mais recentes. Cada item aponta para `SITE_URL/posts/slug/<slug>`, e a descrição é um trecho do conteúdo sem a marcação Markdown.
+Feed RSS 2.0 com os 20 posts aprovados mais recentes. Cada item aponta para `SITE_URL/posts/slug/<slug>`, e a descrição é o `summary` do post ou, sem ele, um trecho do conteúdo sem a marcação Markdown.
 
 ```bash
 curl http://localhost:8080/feed.xml
