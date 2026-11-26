@@ -1,8 +1,9 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { requireApiKey } from "../http/auth.ts"
-import { sendValidationError } from "../http/validation.ts"
+import { assertApiKey } from "../http/auth.ts"
+import { badGateway } from "../http/errors.ts"
+import { parseBody } from "../http/validation.ts"
 import { generateEditorialIdeas } from "../services/editorial.ts"
 
 const ideasBodySchema = z
@@ -21,23 +22,17 @@ const ideasBodySchema = z
   .prefault({})
 
 export function registerEditorialRoutes(app: App) {
-  app.post("/editorial/ideas", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.post(
+    "/editorial/ideas",
+    async (req) => {
+      assertApiKey(req)
+      const body = parseBody(req, ideasBodySchema)
 
-    const parsed = ideasBodySchema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
+      const result = await generateEditorialIdeas(body)
+      if (!result.ok) throw badGateway("Failed to generate ideas")
 
-    try {
-      const result = await generateEditorialIdeas(parsed.data)
-
-      if (!result.ok) {
-        return res.status(502).send({ message: "Failed to generate ideas" })
-      }
-
-      return res.send({ data: { ideas: result.ideas } })
-    } catch (error) {
-      console.error("Falha ao gerar as pautas:", error)
-      return res.status(500).send({ message: "Failed to generate ideas" })
-    }
-  })
+      return { data: { ideas: result.ideas } }
+    },
+    { onError: { message: "Failed to generate ideas", log: "Falha ao gerar as pautas:" } }
+  )
 }
