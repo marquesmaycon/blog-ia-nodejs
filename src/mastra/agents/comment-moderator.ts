@@ -1,8 +1,8 @@
 import { Agent } from "@mastra/core/agent"
 
-export const COMMENT_MODERATOR_AGENT_ID = "comment-moderator"
+import { env } from "../../config/env.ts"
 
-const { COMMENT_MODERATOR_MODEL = "google/gemini-2.5-flash" } = process.env
+export const COMMENT_MODERATOR_AGENT_ID = "comment-moderator"
 
 export const commentModerator = new Agent({
   id: COMMENT_MODERATOR_AGENT_ID,
@@ -26,5 +26,5 @@ export const commentModerator = new Agent({
     - "reason" é uma frase curta, em português do Brasil, explicando o veredito.
     - "categories" lista os problemas encontrados; fica vazia quando o veredito é "approve".
   `.trim(),
-  model: COMMENT_MODERATOR_MODEL
+  model: env().COMMENT_MODERATOR_MODEL
 })

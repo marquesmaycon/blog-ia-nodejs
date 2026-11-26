@@ -1,8 +1,8 @@
 import { Agent } from "@mastra/core/agent"
 
-export const POST_WRITER_AGENT_ID = "post-writer"
+import { env } from "../../config/env.ts"
 
-const { POST_WRITER_MODEL = "google/gemini-2.5-flash" } = process.env
+export const POST_WRITER_AGENT_ID = "post-writer"
 
 export const postWriter = new Agent({
   id: POST_WRITER_AGENT_ID,
@@ -18,5 +18,5 @@ export const postWriter = new Agent({
       de código em blocos com linguagem quando fizer sentido, e uma conclusão.
     - Não invente fatos, números ou citações; se algo for incerto, deixe isso explícito.
   `.trim(),
-  model: POST_WRITER_MODEL
+  model: env().POST_WRITER_MODEL
 })

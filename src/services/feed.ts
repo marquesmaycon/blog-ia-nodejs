@@ -1,3 +1,4 @@
+import { env } from "../config/env.ts"
 import type { Post } from "../domain/posts.ts"
 import { findPosts } from "../repositories/posts.ts"
 
@@ -36,7 +37,7 @@ export function excerpt(markdown: string, maxLength = DESCRIPTION_LENGTH): strin
 
 // URL pública do blog, usada nos links do feed
 export function siteUrl(): string {
-  const { SITE_URL, API_PROTOCOL = "http", API_HOST = "localhost", API_PORT = "8080" } = process.env
+  const { SITE_URL, API_PROTOCOL, API_HOST = "localhost", API_PORT } = env()
   return (SITE_URL || `${API_PROTOCOL}://${API_HOST}:${API_PORT}`).replace(/\/+$/, "")
 }
 

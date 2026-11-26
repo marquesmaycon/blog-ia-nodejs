@@ -1,8 +1,8 @@
 import { Agent } from "@mastra/core/agent"
 
-export const COMMENT_REPLIER_AGENT_ID = "comment-replier"
+import { env } from "../../config/env.ts"
 
-const { COMMENT_REPLIER_MODEL = "google/gemini-2.5-flash" } = process.env
+export const COMMENT_REPLIER_AGENT_ID = "comment-replier"
 
 export const commentReplier = new Agent({
   id: COMMENT_REPLIER_AGENT_ID,
@@ -28,5 +28,5 @@ export const commentReplier = new Agent({
     - A resposta é cordial, direta e curta (até 3 parágrafos), em português do Brasil, em
       Markdown simples, sem saudação longa nem assinatura. Pode citar trechos do post.
   `.trim(),
-  model: COMMENT_REPLIER_MODEL
+  model: env().COMMENT_REPLIER_MODEL
 })

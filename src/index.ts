@@ -1,3 +1,4 @@
+import { env, validateEnv } from "./config/env.ts"
 import { createApp } from "./http/app.ts"
 import { registerCommentRoutes } from "./routes/comments.ts"
 import { registerDocsRoutes } from "./routes/docs.ts"
@@ -7,7 +8,16 @@ import { registerLikeRoutes } from "./routes/likes.ts"
 import { registerPostRoutes } from "./routes/posts.ts"
 import { registerTagRoutes } from "./routes/tags.ts"
 
-const { API_PORT, API_HOST, API_PROTOCOL } = process.env
+// Falha cedo: em runtime, um valor inválido cairia silenciosamente no default
+const envIssues = validateEnv()
+
+if (envIssues.length > 0) {
+  const list = envIssues.map((issue) => `  - ${issue}`).join("\n")
+  console.error(`Variáveis de ambiente inválidas:\n${list}`)
+  process.exit(1)
+}
+
+const { API_PORT, API_HOST, API_PROTOCOL } = env()
 
 const app = createApp()
 
@@ -19,7 +29,7 @@ registerTagRoutes(app)
 registerFeedRoutes(app)
 registerEditorialRoutes(app)
 
-app.listen({ port: Number(API_PORT ?? 8080), host: API_HOST }, () => {
+app.listen({ port: API_PORT, host: API_HOST }, () => {
   console.log(`Server running on ${API_PROTOCOL}://${API_HOST}:${API_PORT}`)
   console.log("Press CTRL+C to stop")
 })

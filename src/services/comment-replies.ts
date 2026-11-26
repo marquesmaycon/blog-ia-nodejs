@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { env } from "../config/env.ts"
 import type { Comment } from "../domain/comments.ts"
 import type { Post } from "../domain/posts.ts"
 import { COMMENT_REPLIER_AGENT_ID } from "../mastra/agents/comment-replier.ts"
@@ -19,7 +20,6 @@ const replySchema = z.object({
 const POST_CONTENT_LENGTH = 8000
 // Mesmo limite dos comentários de leitores (routes/comments.ts)
 const REPLY_MAX_LENGTH = 2000
-const DEFAULT_TIMEOUT_MS = 20_000
 
 export const REPLY_AUTHOR_NAME = "Autor do blog (IA)"
 
@@ -36,11 +36,6 @@ export type DraftReplyError =
 export type DraftReplyResult =
   | { ok: true; reply: Comment }
   | { ok: false; error: DraftReplyError; reason?: string }
-
-function timeoutMs(): number {
-  const value = Number(process.env.COMMENT_REPLY_TIMEOUT_MS)
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS
-}
 
 function buildPrompt(post: Pick<Post, "title" | "content">, comment: CommentToReply): string {
   return [
@@ -87,7 +82,7 @@ export async function draftCommentReply(commentId: string): Promise<DraftReplyRe
     const agent = mastra.getAgent(COMMENT_REPLIER_AGENT_ID)
     const result = await agent.generate(buildPrompt(post, comment), {
       structuredOutput: { schema: replySchema },
-      abortSignal: AbortSignal.timeout(timeoutMs())
+      abortSignal: AbortSignal.timeout(env().COMMENT_REPLY_TIMEOUT_MS)
     })
     object = replySchema.parse(result.object)
   } catch (error) {

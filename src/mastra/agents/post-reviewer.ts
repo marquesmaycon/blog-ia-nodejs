@@ -1,8 +1,8 @@
 import { Agent } from "@mastra/core/agent"
 
-export const POST_REVIEWER_AGENT_ID = "post-reviewer"
+import { env } from "../../config/env.ts"
 
-const { POST_REVIEWER_MODEL = "google/gemini-2.5-flash" } = process.env
+export const POST_REVIEWER_AGENT_ID = "post-reviewer"
 
 export const postReviewer = new Agent({
   id: POST_REVIEWER_AGENT_ID,
@@ -31,5 +31,5 @@ export const postReviewer = new Agent({
       receber nota baixa e ter isso apontado em "issues".
     - Escreva "issues" e "suggestions" em português do Brasil.
   `.trim(),
-  model: POST_REVIEWER_MODEL
+  model: env().POST_REVIEWER_MODEL
 })

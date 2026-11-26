@@ -4,6 +4,7 @@
 import { createStep, createWorkflow } from "@mastra/core/workflows"
 import { z } from "zod"
 
+import { env } from "../../config/env.ts"
 import { META_DESCRIPTION_MAX_LENGTH, SUMMARY_MAX_LENGTH } from "../../utils/seo.ts"
 import { truncate } from "../../utils/truncate.ts"
 import { POST_REVIEWER_AGENT_ID } from "../agents/post-reviewer.ts"
@@ -11,11 +12,6 @@ import { POST_SEO_AGENT_ID } from "../agents/post-seo.ts"
 import { POST_WRITER_AGENT_ID } from "../agents/post-writer.ts"
 
 export const POST_DRAFTING_WORKFLOW_ID = "post-drafting"
-
-const DEFAULT_MAX_ATTEMPTS = 3
-const DEFAULT_MIN_SCORE = 7
-const DEFAULT_REVIEW_TIMEOUT_MS = 30_000
-const DEFAULT_SEO_TIMEOUT_MS = 20_000
 
 export const MAX_SEO_TAGS = 5
 
@@ -74,25 +70,12 @@ const iterationSchema = z.object({
 
 type Iteration = z.infer<typeof iterationSchema>
 
-function positiveIntEnv(name: string, fallback: number): number {
-  const value = Number(process.env[name])
-  return Number.isInteger(value) && value > 0 ? value : fallback
-}
-
 export function maxAttempts(): number {
-  return positiveIntEnv("POST_REVIEW_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)
+  return env().POST_REVIEW_MAX_ATTEMPTS
 }
 
 export function minScore(): number {
-  return positiveIntEnv("POST_REVIEW_MIN_SCORE", DEFAULT_MIN_SCORE)
-}
-
-function reviewTimeoutMs(): number {
-  return positiveIntEnv("POST_REVIEW_TIMEOUT_MS", DEFAULT_REVIEW_TIMEOUT_MS)
-}
-
-function seoTimeoutMs(): number {
-  return positiveIntEnv("POST_SEO_TIMEOUT_MS", DEFAULT_SEO_TIMEOUT_MS)
+  return env().POST_REVIEW_MIN_SCORE
 }
 
 // Sem review (o revisor falhou) não há feedback para reescrever: encerra com o que tem
@@ -194,7 +177,7 @@ const reviewDraftStep = createStep({
       const reviewer = mastra.getAgent(POST_REVIEWER_AGENT_ID)
       const { object } = await reviewer.generate(buildReviewPrompt(idea, draft), {
         structuredOutput: { schema: reviewSchema },
-        abortSignal: AbortSignal.timeout(reviewTimeoutMs())
+        abortSignal: AbortSignal.timeout(env().POST_REVIEW_TIMEOUT_MS)
       })
       review = object
     } catch (error) {
@@ -230,7 +213,7 @@ const generateSeoStep = createStep({
       const agent = mastra.getAgent(POST_SEO_AGENT_ID)
       const { object } = await agent.generate(buildSeoPrompt(draft, existingTags), {
         structuredOutput: { schema: seoSchema },
-        abortSignal: AbortSignal.timeout(seoTimeoutMs())
+        abortSignal: AbortSignal.timeout(env().POST_SEO_TIMEOUT_MS)
       })
       seo = normalizeSeo(object)
     } catch (error) {

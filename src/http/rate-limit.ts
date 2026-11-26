@@ -1,3 +1,4 @@
+import { env } from "../config/env.ts"
 import type { Reply, Request } from "./app.ts"
 
 export type RateLimitOptions = {
@@ -12,7 +13,7 @@ type Bucket = { count: number; resetAt: number }
 // IP do cliente. X-Forwarded-For só é confiável atrás de um proxy (TRUST_PROXY=true);
 // sem ele, o cliente poderia forjar o header e ganhar uma cota nova a cada requisição.
 export function getClientIp(req: Request<unknown>): string {
-  if (process.env.TRUST_PROXY === "true") {
+  if (env().TRUST_PROXY) {
     const header = req.headers["x-forwarded-for"]
     const forwarded = (Array.isArray(header) ? header[0] : header)?.split(",")[0]?.trim()
     if (forwarded) return forwarded

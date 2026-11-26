@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { env } from "../config/env.ts"
 import { EDITORIAL_PLANNER_AGENT_ID } from "../mastra/agents/editorial-planner.ts"
 import { mastra } from "../mastra/index.ts"
 import { slugify } from "../utils/slugify.ts"
@@ -31,12 +32,6 @@ export type EditorialIdeasResult =
 const MAX_SUGGESTED_TAGS = 3
 // Cada tool chamada é um passo; folga para as buscas de checagem de cada ideia
 const MAX_STEPS = 12
-const DEFAULT_TIMEOUT_MS = 60_000
-
-function timeoutMs(): number {
-  const value = Number(process.env.EDITORIAL_IDEAS_TIMEOUT_MS)
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS
-}
 
 export function buildPrompt({ count, days, focus }: EditorialIdeasOptions): string {
   return [
@@ -113,7 +108,7 @@ export async function generateEditorialIdeas(
     const result = await agent.generate(buildPrompt(options), {
       structuredOutput: { schema: ideasSchema },
       maxSteps: MAX_STEPS,
-      abortSignal: AbortSignal.timeout(timeoutMs())
+      abortSignal: AbortSignal.timeout(env().EDITORIAL_IDEAS_TIMEOUT_MS)
     })
     const { ideas } = ideasSchema.parse(result.object)
 

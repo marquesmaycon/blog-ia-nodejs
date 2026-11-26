@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto"
 
+import { env } from "../config/env.ts"
 import type { Reply, Request } from "./app.ts"
 
 function extractBearerToken(req: Request<unknown>): string | null {
@@ -20,7 +21,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export function hasValidApiKey(req: Request<unknown>): boolean {
-  const apiKey = process.env.API_KEY
+  const apiKey = env().API_KEY
   if (!apiKey) return false
 
   const token = extractBearerToken(req)

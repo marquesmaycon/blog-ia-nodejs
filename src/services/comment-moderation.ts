@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { env } from "../config/env.ts"
 import type { Comment } from "../domain/comments.ts"
 import type { Post } from "../domain/posts.ts"
 import { COMMENT_MODERATOR_AGENT_ID } from "../mastra/agents/comment-moderator.ts"
@@ -26,7 +27,6 @@ const moderationSchema = z.object({
 
 // Só o começo do post: basta para o contexto e limita os tokens gastos por comentário
 const POST_EXCERPT_LENGTH = 1500
-const DEFAULT_TIMEOUT_MS = 10_000
 
 export type ModerationResult = Pick<
   Comment,
@@ -40,11 +40,6 @@ const PENDING: ModerationResult = {
   status: "pending",
   moderation_reason: null,
   moderation_categories: []
-}
-
-function timeoutMs(): number {
-  const value = Number(process.env.COMMENT_MODERATION_TIMEOUT_MS)
-  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TIMEOUT_MS
 }
 
 function buildPrompt(post: Pick<Post, "title" | "content">, comment: CommentToModerate): string {
@@ -64,7 +59,7 @@ export async function moderateComment(
     const agent = mastra.getAgent(COMMENT_MODERATOR_AGENT_ID)
     const { object } = await agent.generate(buildPrompt(post, comment), {
       structuredOutput: { schema: moderationSchema },
-      abortSignal: AbortSignal.timeout(timeoutMs())
+      abortSignal: AbortSignal.timeout(env().COMMENT_MODERATION_TIMEOUT_MS)
     })
 
     switch (object.verdict) {
