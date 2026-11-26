@@ -17,7 +17,9 @@ const newPost: NewPost = {
   title: "Streams no Node",
   content: "## Streams",
   slug: "streams-no-node",
-  reading_time_minutes: 1
+  reading_time_minutes: 1,
+  summary: "Como usar streams no Node.",
+  meta_description: "Aprenda streams no Node."
 }
 
 const reviews: NewPostReview[] = [
@@ -87,6 +89,37 @@ describe("repositories/post-reviews", () => {
         [1, 2]
       )
       assert.deepEqual(await findPostReviews(post.id), saved)
+    })
+
+    it("grava os metadados de SEO e devolve o post já com as tags", async () => {
+      const tags = [
+        { name: "Node.js", slug: "node-js" },
+        { name: "Streams", slug: "streams" }
+      ]
+
+      const { post } = await insertPostWithReviews(newPost, reviews, tags)
+
+      assert.equal(post.summary, newPost.summary)
+      assert.equal(post.meta_description, newPost.meta_description)
+      assert.deepEqual(post.tags, tags)
+      assert.deepEqual((await findPostById(post.id))?.tags, tags)
+    })
+
+    it("desfaz o post e as revisões quando as tags falham", async () => {
+      // Slug de tag repetido no mesmo comando faz o ON CONFLICT DO UPDATE falhar
+      const duplicated = [
+        { name: "IA", slug: "ia" },
+        { name: "Ia", slug: "ia" }
+      ]
+
+      await assert.rejects(insertPostWithReviews(newPost, reviews, duplicated))
+
+      const posts = await pool.query("SELECT id FROM posts WHERE slug = $1", [newPost.slug])
+      const reviewRows = await pool.query("SELECT id FROM post_reviews")
+      const tagRows = await pool.query("SELECT id FROM tags")
+      assert.deepEqual(posts.rows, [])
+      assert.deepEqual(reviewRows.rows, [])
+      assert.deepEqual(tagRows.rows, [])
     })
 
     it("desfaz o post quando as revisões falham", async () => {

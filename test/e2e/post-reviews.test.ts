@@ -7,6 +7,7 @@ import request from "supertest"
 
 import { createApp } from "../../src/http/app.ts"
 import { POST_REVIEWER_AGENT_ID } from "../../src/mastra/agents/post-reviewer.ts"
+import { POST_SEO_AGENT_ID } from "../../src/mastra/agents/post-seo.ts"
 import { mastra } from "../../src/mastra/index.ts"
 import type { PostReview } from "../../src/repositories/post-reviews.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
@@ -18,6 +19,11 @@ const auth = { Authorization: `Bearer ${API_KEY}` }
 const app = createApp()
 registerPostRoutes(app)
 const api = () => request(app.server)
+
+// SEO vazio: o slug sai do título e os metadados ficam nulos
+const emptySeo = async () => ({
+  object: { summary: "", meta_description: "", slug: "", tags: [] }
+})
 
 // O redator numera as versões; o revisor devolve as notas na ordem (Error = falha)
 function mockAgents(scores: (number | Error)[]) {
@@ -40,8 +46,12 @@ function mockAgents(scores: (number | Error)[]) {
     }
   }
 
+  const agents: Record<string, () => Promise<unknown>> = {
+    [POST_REVIEWER_AGENT_ID]: review,
+    [POST_SEO_AGENT_ID]: emptySeo
+  }
   return mock.method(mastra, "getAgent", ((id: string) => ({
-    generate: id === POST_REVIEWER_AGENT_ID ? review : write
+    generate: agents[id] ?? write
   })) as never)
 }
 

@@ -8,8 +8,10 @@ import request from "supertest"
 
 import { createApp } from "../../src/http/app.ts"
 import { POST_REVIEWER_AGENT_ID } from "../../src/mastra/agents/post-reviewer.ts"
+import { POST_SEO_AGENT_ID } from "../../src/mastra/agents/post-seo.ts"
 import { mastra } from "../../src/mastra/index.ts"
 import type { Post } from "../../src/repositories/posts.ts"
+import { registerFeedRoutes } from "../../src/routes/feed.ts"
 import { registerPostRoutes } from "../../src/routes/posts.ts"
 import { pool, truncatePosts } from "../helpers/db.ts"
 
@@ -18,17 +20,28 @@ const auth = { Authorization: `Bearer ${API_KEY}` }
 
 const app = createApp()
 registerPostRoutes(app)
+registerFeedRoutes(app)
 const api = () => request(app.server)
 
 // O revisor aprova de primeira por padrão, para cada rascunho custar uma escrita só
 const approvingReview = async () => ({ object: { score: 9, issues: [], suggestions: [] } })
 
+// Por padrão o SEO volta vazio: o slug sai do título e o post fica sem tags e sem summary
+const emptySeo = async () => ({
+  object: { summary: "", meta_description: "", slug: "", tags: [] }
+})
+
 function mockPostWriter(
   generate: () => Promise<unknown>,
-  review: () => Promise<unknown> = approvingReview
+  review: () => Promise<unknown> = approvingReview,
+  seo: () => Promise<unknown> = emptySeo
 ) {
+  const agents: Record<string, () => Promise<unknown>> = {
+    [POST_REVIEWER_AGENT_ID]: review,
+    [POST_SEO_AGENT_ID]: seo
+  }
   return mock.method(mastra, "getAgent", ((id: string) => ({
-    generate: id === POST_REVIEWER_AGENT_ID ? review : generate
+    generate: agents[id] ?? generate
   })) as never)
 }
 
@@ -42,6 +55,18 @@ async function createDraft(idea: string): Promise<Post> {
   // A revisão só vem na resposta da criação; o resto da API devolve o Post puro
   const { review: _review, ...post } = res.body.data
   return post
+}
+
+// Rascunho cujo SEO sugere estas tags
+async function createDraftWithTags(idea: string, tags: string[]): Promise<Post> {
+  mockPostWriter(
+    async () => ({ object: { title: `Post sobre ${idea}`, content: "## Texto" } }),
+    approvingReview,
+    async () => ({ object: { summary: "", meta_description: "", slug: "", tags } })
+  )
+  const res = await api().post("/posts/draft").set(auth).send({ idea }).expect(201)
+  mock.restoreAll()
+  return res.body.data
 }
 
 describe("E2E /posts", () => {
@@ -240,6 +265,101 @@ Conteúdo sobre ${title}.`
         .expect(404, { message: "Post not found" })
 
       await api().get("/posts/slug/Slug_Invalido").expect(400)
+    })
+  })
+
+  describe("SEO do rascunho", () => {
+    const generatedSeo = {
+      summary: "Como processar arquivos grandes com streams.",
+      meta_description: "Aprenda a usar streams no Node.js.",
+      slug: "guia-de-streams",
+      tags: ["Node.js", "Streams"]
+    }
+
+    it("grava slug, tags e metadados da IA, edita o summary e publica no feed", async () => {
+      mockPostWriter(
+        async () => ({ object: { title: "Streams no Node", content: "## Streams" } }),
+        approvingReview,
+        async () => ({ object: generatedSeo })
+      )
+
+      // 1. O rascunho nasce com o SEO gerado
+      const created = await api().post("/posts/draft").set(auth).send({ idea: "streams" })
+      assert.equal(created.status, 201)
+      const draft: Post = created.body.data
+      assert.equal(draft.slug, "guia-de-streams")
+      assert.equal(draft.summary, generatedSeo.summary)
+      assert.equal(draft.meta_description, generatedSeo.meta_description)
+      assert.deepEqual(draft.tags, [
+        { name: "Node.js", slug: "node-js" },
+        { name: "Streams", slug: "streams" }
+      ])
+
+      // 2. Edita o summary; a meta_description ausente fica como estava
+      const edited = await api()
+        .put(`/posts/${draft.id}`)
+        .set(auth)
+        .send({ title: draft.title, content: draft.content, summary: "Resumo revisado." })
+        .expect(200)
+      assert.equal(edited.body.data.summary, "Resumo revisado.")
+      assert.equal(edited.body.data.meta_description, generatedSeo.meta_description)
+      assert.equal(edited.body.data.slug, "guia-de-streams")
+
+      // 3. Aprovado, aparece no filtro pela tag sugerida e no RSS com o summary
+      await api().patch(`/posts/${draft.id}/approve`).set(auth).expect(200)
+
+      const byTag = await api().get("/posts?tag=streams").expect(200)
+      assert.deepEqual(
+        byTag.body.data.map((post: Post) => post.id),
+        [draft.id]
+      )
+
+      const feed = await api().get("/feed.xml").expect(200)
+      assert.match(feed.text, /<description>Resumo revisado.<\/description>/)
+    })
+
+    it("o agente recebe as tags que já existem", async () => {
+      await createDraftWithTags("primeiro", ["Node.js"])
+      const seo = mock.fn(async () => ({ object: generatedSeo }))
+      mockPostWriter(
+        async () => ({ object: { title: "Outro post", content: "## Texto" } }),
+        approvingReview,
+        seo
+      )
+
+      await api().post("/posts/draft").set(auth).send({ idea: "outro" }).expect(201)
+
+      const [prompt] = seo.mock.calls[0].arguments as unknown as [string]
+      assert.match(prompt, /Tags existentes: Node.js/)
+    })
+
+    it("sem SEO (o agente falhou), o rascunho sai com o slug do título e sem tags", async () => {
+      mock.method(console, "error", () => {})
+      mockPostWriter(
+        async () => ({ object: { title: "Streams no Node", content: "## Streams" } }),
+        approvingReview,
+        async () => {
+          throw new Error("SEO indisponível")
+        }
+      )
+
+      const created = await api().post("/posts/draft").set(auth).send({ idea: "streams" })
+
+      assert.equal(created.status, 201)
+      assert.equal(created.body.data.slug, "streams-no-node")
+      assert.equal(created.body.data.summary, null)
+      assert.equal(created.body.data.meta_description, null)
+      assert.deepEqual(created.body.data.tags, [])
+    })
+
+    it("responde 400 para summary longo demais na edição", async () => {
+      const draft = await createDraft("limite")
+
+      await api()
+        .put(`/posts/${draft.id}`)
+        .set(auth)
+        .send({ title: draft.title, content: draft.content, summary: "x".repeat(301) })
+        .expect(400)
     })
   })
 

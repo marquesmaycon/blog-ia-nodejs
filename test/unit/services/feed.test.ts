@@ -15,6 +15,8 @@ const post: Post = {
   slug: "testes-com-node",
   title: "Testes & <Node>",
   content: "# Título\n\nUm **texto** com [link](https://x.dev) e `código`.",
+  summary: null,
+  meta_description: null,
   reading_time_minutes: 1,
   published_at: "2026-01-05T12:00:00.000Z",
   approved_at: "2026-01-05T12:00:00.000Z",
@@ -100,6 +102,12 @@ describe("services/feed", () => {
       assert.match(xml, /<pubDate>Mon, 05 Jan 2026 12:00:00 GMT<\/pubDate>/)
       assert.match(xml, /<description>Título Um texto com link e código.<\/description>/)
       assert.match(xml, /<lastBuildDate>Mon, 05 Jan 2026 12:00:00 GMT<\/lastBuildDate>/)
+    })
+
+    it("usa o summary do SEO na description quando existe", () => {
+      const xml = buildRssFeed([{ ...post, summary: "Resumo & cia" }], "https://blog.dev")
+
+      assert.match(xml, /<description>Resumo &amp; cia<\/description>/)
     })
 
     it("gera um canal válido sem itens quando não há posts", () => {

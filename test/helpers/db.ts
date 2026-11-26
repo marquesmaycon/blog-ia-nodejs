@@ -24,6 +24,8 @@ export async function seedPost(
     slug: id,
     title: "Post de teste",
     content: "# Conteúdo",
+    summary: null,
+    meta_description: null,
     reading_time_minutes: 1,
     published_at: new Date().toISOString(),
     approved_at: null,
@@ -33,14 +35,17 @@ export async function seedPost(
 
   const { rows } = await pool.query<Post>(
     `INSERT INTO posts
-       (id, slug, title, content, reading_time_minutes, published_at, approved_at, rejected_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (id, slug, title, content, summary, meta_description, reading_time_minutes,
+        published_at, approved_at, rejected_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      RETURNING ${POST_COLUMNS}`,
     [
       post.id,
       post.slug,
       post.title,
       post.content,
+      post.summary,
+      post.meta_description,
       post.reading_time_minutes,
       post.published_at,
       post.approved_at,

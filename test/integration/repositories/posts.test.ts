@@ -38,6 +38,8 @@ const pickCounters = (post: Post | null) => ({
 const newPost = (data: Pick<NewPost, "title" | "content">): NewPost => ({
   slug: `slug-${crypto.randomUUID()}`,
   reading_time_minutes: 1,
+  summary: null,
+  meta_description: null,
   ...data
 })
 
@@ -95,23 +97,34 @@ describe("repositories/posts", () => {
   })
 
   describe("slug e tempo de leitura", () => {
-    it("insertPost grava slug e reading_time_minutes", async () => {
+    it("insertPost grava slug, reading_time_minutes e os metadados de SEO", async () => {
       const post = await insertPost({
         title: "Título",
         content: "Conteúdo",
         slug: "titulo",
-        reading_time_minutes: 3
+        reading_time_minutes: 3,
+        summary: "Resumo do post.",
+        meta_description: "Descrição para buscadores."
       })
 
       assert.equal(post.slug, "titulo")
       assert.equal(post.reading_time_minutes, 3)
+      assert.equal(post.summary, "Resumo do post.")
+      assert.equal(post.meta_description, "Descrição para buscadores.")
+    })
+
+    it("insertPost aceita os metadados de SEO nulos", async () => {
+      const post = await insertPost(newPost({ title: "Sem SEO", content: "Conteúdo" }))
+
+      assert.equal(post.summary, null)
+      assert.equal(post.meta_description, null)
     })
 
     it("rejeita slug repetido pela constraint posts_slug_key", async () => {
       await seedPost({ slug: "repetido" })
 
       await assert.rejects(
-        insertPost({ title: "B", content: "B", slug: "repetido", reading_time_minutes: 1 }),
+        insertPost({ ...newPost({ title: "B", content: "B" }), slug: "repetido" }),
         { code: "23505", constraint: "posts_slug_key" }
       )
     })
@@ -149,7 +162,9 @@ describe("repositories/posts", () => {
       title: "Novo título zebra",
       content: "Novo conteúdo",
       slug: "novo-titulo-zebra",
-      reading_time_minutes: 2
+      reading_time_minutes: 2,
+      summary: "Novo resumo",
+      meta_description: null
     }
 
     it("atualiza o rascunho e a coluna de busca acompanha", async () => {
@@ -161,6 +176,8 @@ describe("repositories/posts", () => {
       assert.equal(updated?.content, changes.content)
       assert.equal(updated?.slug, changes.slug)
       assert.equal(updated?.reading_time_minutes, 2)
+      assert.equal(updated?.summary, "Novo resumo")
+      assert.equal(updated?.meta_description, null)
 
       await approvePostById(draft.id)
       assert.deepEqual(await searchIds("zebra"), [draft.id])

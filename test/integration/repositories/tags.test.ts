@@ -3,8 +3,10 @@ import assert from "node:assert/strict"
 import { after, beforeEach, describe, it } from "node:test"
 
 import { findPostById } from "../../../src/repositories/posts.ts"
+import { withTransaction } from "../../../src/db/index.ts"
 import {
   deleteTagBySlug,
+  findAllTagNames,
   findTagsWithApprovedPosts,
   replacePostTags
 } from "../../../src/repositories/tags.ts"
@@ -85,6 +87,35 @@ describe("repositories/tags", () => {
 
       assert.deepEqual(await tagsOf(post.id), [NODE])
       assert.equal(await countTags(), 1)
+    })
+
+    it("com client, participa da transação de quem chamou", async () => {
+      const post = await seedPost()
+
+      await assert.rejects(
+        withTransaction(async (client) => {
+          await replacePostTags(post.id, [NODE, IA], client)
+          throw new Error("falha depois das tags")
+        }),
+        /falha depois das tags/
+      )
+
+      assert.deepEqual(await tagsOf(post.id), [])
+      assert.equal(await countTags(), 0)
+    })
+  })
+
+  describe("findAllTagNames", () => {
+    it("lista todas as tags pelo nome, inclusive as que só estão em rascunhos", async () => {
+      const draft = await seedPost()
+      await replacePostTags(draft.id, [TS, NODE])
+      await seedTag({ name: "IA" })
+
+      assert.deepEqual(await findAllTagNames(), ["IA", "Node.js", "TypeScript"])
+    })
+
+    it("retorna lista vazia sem tags", async () => {
+      assert.deepEqual(await findAllTagNames(), [])
     })
   })
 

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict"
 import { beforeEach, describe, it, mock } from "node:test"
 
-import type { DraftReview } from "../../../src/mastra/workflows/post-drafting.ts"
+import type { DraftReview, PostSeo } from "../../../src/mastra/workflows/post-drafting.ts"
 import type { NewPostReview, PostReview } from "../../../src/repositories/post-reviews.ts"
 import type {
   DraftChanges,
@@ -11,7 +11,8 @@ import type {
   NewPost,
   Pagination,
   Post,
-  PostsPage
+  PostsPage,
+  PostTag
 } from "../../../src/repositories/posts.ts"
 
 const post: Post = {
@@ -20,6 +21,8 @@ const post: Post = {
   title: "Título",
   reading_time_minutes: 1,
   content: "Conteúdo",
+  summary: null,
+  meta_description: null,
   published_at: "2026-01-01T00:00:00.000Z",
   approved_at: null,
   rejected_at: null,
@@ -54,10 +57,20 @@ const toSavedReview = (review: NewPostReview, postId: string): PostReview => ({
 })
 
 const reviewsRepository = {
-  insertPostWithReviews: mock.fn(async (data: NewPost, reviews: NewPostReview[]) => ({
-    post: { ...post, ...data },
-    reviews: reviews.map((review) => toSavedReview(review, post.id))
-  }))
+  insertPostWithReviews: mock.fn(
+    async (data: NewPost, reviews: NewPostReview[], _tags?: PostTag[]) => ({
+      post: { ...post, ...data },
+      reviews: reviews.map((review) => toSavedReview(review, post.id))
+    })
+  )
+}
+
+// services/tags (real) também importa deste módulo, por isso todas as funções aparecem aqui
+const tagsRepository = {
+  findAllTagNames: mock.fn(async (): Promise<string[]> => ["Node.js", "Testes"]),
+  replacePostTags: mock.fn(async () => {}),
+  findTagsWithApprovedPosts: mock.fn(async () => []),
+  deleteTagBySlug: mock.fn(async () => true)
 }
 
 const generatedReviews: DraftReview[] = [
@@ -66,13 +79,16 @@ const generatedReviews: DraftReview[] = [
 ]
 
 type WorkflowResult =
-  | { status: "success"; result: { title: string; content: string; reviews: DraftReview[] } }
+  | {
+      status: "success"
+      result: { title: string; content: string; reviews: DraftReview[]; seo: PostSeo | null }
+    }
   | { status: "failed"; error: Error }
 
 const start = mock.fn(
   async (_options: { inputData: { idea: string } }): Promise<WorkflowResult> => ({
     status: "success",
-    result: { title: "Gerado", content: "## Corpo", reviews: generatedReviews }
+    result: { title: "Gerado", content: "## Corpo", reviews: generatedReviews, seo: null }
   })
 )
 const createRun = mock.fn(async () => ({ start }))
@@ -82,6 +98,7 @@ mock.module(import.meta.resolve("../../../src/repositories/posts.ts"), { exports
 mock.module(import.meta.resolve("../../../src/repositories/post-reviews.ts"), {
   exports: reviewsRepository
 })
+mock.module(import.meta.resolve("../../../src/repositories/tags.ts"), { exports: tagsRepository })
 mock.module(import.meta.resolve("../../../src/mastra/index.ts"), {
   exports: { mastra: { getWorkflow } }
 })
@@ -100,12 +117,24 @@ const {
   updatePostDraft
 } = await import("../../../src/services/posts.ts")
 
-// Próxima execução do workflow devolve este texto e estas revisões
-const generated = (title: string, content: string, reviews: DraftReview[] = []) =>
+// Próxima execução do workflow devolve este texto, estas revisões e este SEO
+const generated = (
+  title: string,
+  content: string,
+  reviews: DraftReview[] = [],
+  seo: PostSeo | null = null
+) =>
   start.mock.mockImplementationOnce(async () => ({
     status: "success",
-    result: { title, content, reviews }
+    result: { title, content, reviews, seo }
   }))
+
+const seo: PostSeo = {
+  summary: "Resumo do post.",
+  meta_description: "Descrição para buscadores.",
+  slug: "Slug da IA",
+  tags: ["Node.js", "node js", "Testes"]
+}
 
 const slugConflict = () =>
   Object.assign(new Error("duplicate key"), { code: "23505", constraint: "posts_slug_key" })
@@ -117,6 +146,7 @@ describe("services/posts", () => {
     for (const fn of [
       ...Object.values(repository),
       ...Object.values(reviewsRepository),
+      ...Object.values(tagsRepository),
       start,
       createRun,
       getWorkflow
@@ -180,17 +210,60 @@ describe("services/posts", () => {
   describe("createPostDraft", () => {
     const insert = reviewsRepository.insertPostWithReviews
 
-    it("roda o workflow post-drafting com a ideia e grava o post com as revisões", async () => {
+    it("roda o workflow com a ideia e as tags existentes e grava o post com as revisões", async () => {
       const result = await createPostDraft("testes com node")
 
       assert.deepEqual(getWorkflow.mock.calls[0].arguments, ["post-drafting"])
-      assert.deepEqual(start.mock.calls[0].arguments, [{ inputData: { idea: "testes com node" } }])
+      assert.deepEqual(start.mock.calls[0].arguments, [
+        { inputData: { idea: "testes com node", existingTags: ["Node.js", "Testes"] } }
+      ])
 
       assert.deepEqual(insert.mock.calls[0].arguments, [
-        { title: "Gerado", content: "## Corpo", slug: "gerado", reading_time_minutes: 1 },
-        generatedReviews
+        {
+          title: "Gerado",
+          content: "## Corpo",
+          slug: "gerado",
+          reading_time_minutes: 1,
+          summary: null,
+          meta_description: null
+        },
+        generatedReviews,
+        []
       ])
       assert.equal(result.title, "Gerado")
+    })
+
+    it("grava o SEO gerado: slug da IA, metadados e tags sem repetição", async () => {
+      generated("Gerado", "## Corpo", generatedReviews, seo)
+
+      await createPostDraft("ideia")
+
+      const [data, , tags] = insert.mock.calls[0].arguments
+      assert.equal(data.slug, "slug-da-ia")
+      assert.equal(data.summary, "Resumo do post.")
+      assert.equal(data.meta_description, "Descrição para buscadores.")
+      assert.deepEqual(tags, [
+        { name: "Node.js", slug: "node-js" },
+        { name: "Testes", slug: "testes" }
+      ])
+    })
+
+    it("usa o título quando o slug da IA vem vazio", async () => {
+      generated("Título Gerado", "## Corpo", [], { ...seo, slug: "" })
+
+      await createPostDraft("ideia")
+
+      assert.equal(insert.mock.calls[0].arguments[0].slug, "titulo-gerado")
+    })
+
+    it("trata colisão no slug da IA como no slug do título", async () => {
+      generated("Gerado", "## Corpo", [], seo)
+      repository.findTakenSlugs.mock.mockImplementationOnce(async () => ["slug-da-ia"])
+
+      await createPostDraft("ideia")
+
+      assert.deepEqual(repository.findTakenSlugs.mock.calls[0].arguments, ["slug-da-ia", undefined])
+      assert.equal(insert.mock.calls[0].arguments[0].slug, "slug-da-ia-2")
     })
 
     it("devolve a última revisão junto com o post", async () => {
@@ -346,7 +419,14 @@ describe("services/posts", () => {
       assert.deepEqual(repository.findTakenSlugs.mock.calls[0].arguments, ["novo-titulo", "abc"])
       assert.deepEqual(repository.updateDraftById.mock.calls[0].arguments, [
         "abc",
-        { title: "Novo Título", content: "Texto", slug: "novo-titulo", reading_time_minutes: 1 }
+        {
+          title: "Novo Título",
+          content: "Texto",
+          slug: "novo-titulo",
+          reading_time_minutes: 1,
+          summary: null,
+          meta_description: null
+        }
       ])
       assert.equal(result.status, "updated")
     })
@@ -359,8 +439,48 @@ describe("services/posts", () => {
       assert.equal(repository.findTakenSlugs.mock.callCount(), 0)
       assert.deepEqual(repository.updateDraftById.mock.calls[0].arguments, [
         "abc",
-        { title: post.title, content, slug: "titulo", reading_time_minutes: 2 }
+        {
+          title: post.title,
+          content,
+          slug: "titulo",
+          reading_time_minutes: 2,
+          summary: null,
+          meta_description: null
+        }
       ])
+    })
+
+    it("mantém summary e meta_description atuais quando não vêm na edição", async () => {
+      repository.findPostById.mock.mockImplementationOnce(async () => ({
+        ...post,
+        summary: "Resumo atual",
+        meta_description: "Meta atual"
+      }))
+
+      await updatePostDraft("abc", { title: post.title, content: "C" })
+
+      const [, changes] = repository.updateDraftById.mock.calls[0].arguments
+      assert.equal(changes.summary, "Resumo atual")
+      assert.equal(changes.meta_description, "Meta atual")
+    })
+
+    it("substitui ou limpa (null) summary e meta_description quando vêm na edição", async () => {
+      repository.findPostById.mock.mockImplementationOnce(async () => ({
+        ...post,
+        summary: "Resumo atual",
+        meta_description: "Meta atual"
+      }))
+
+      await updatePostDraft("abc", {
+        title: post.title,
+        content: "C",
+        summary: "Resumo novo",
+        meta_description: null
+      })
+
+      const [, changes] = repository.updateDraftById.mock.calls[0].arguments
+      assert.equal(changes.summary, "Resumo novo")
+      assert.equal(changes.meta_description, null)
     })
 
     it("responde approved quando o post foi aprovado entre a leitura e o update", async () => {

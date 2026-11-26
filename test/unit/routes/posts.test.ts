@@ -54,6 +54,8 @@ const post: Post = {
   title: "Título",
   reading_time_minutes: 1,
   content: "Conteúdo",
+  summary: null,
+  meta_description: null,
   published_at: "2026-01-01T00:00:00.000Z",
   approved_at: null,
   rejected_at: null,
@@ -416,7 +418,58 @@ describe("rotas /posts", () => {
       assert.deepEqual(res.body, { message: "Approved posts cannot be edited" })
     })
 
+    it("repassa summary e meta_description com trim, e texto vazio vira null", async () => {
+      services.updatePostDraft.mock.mockImplementationOnce(async () => ({
+        status: "updated",
+        post
+      }))
+
+      const res = await request(buildServer())
+        .put("/posts/abc")
+        .set(auth)
+        .send({ ...body, summary: "  Resumo  ", meta_description: "   " })
+
+      assert.equal(res.status, 200)
+      assert.deepEqual(services.updatePostDraft.mock.calls[0].arguments, [
+        "abc",
+        {
+          title: "Novo título",
+          content: "Novo conteúdo",
+          summary: "Resumo",
+          meta_description: null
+        }
+      ])
+    })
+
+    it("aceita null explícito em summary e meta_description", async () => {
+      services.updatePostDraft.mock.mockImplementationOnce(async () => ({
+        status: "updated",
+        post
+      }))
+
+      await request(buildServer())
+        .put("/posts/abc")
+        .set(auth)
+        .send({ ...body, summary: null, meta_description: null })
+        .expect(200)
+
+      const [, data] = services.updatePostDraft.mock.calls[0].arguments
+      assert.equal(data.summary, null)
+      assert.equal(data.meta_description, null)
+    })
+
     for (const [name, invalid, field] of [
+      [
+        "com summary longo demais",
+        { title: "T", content: "C", summary: "x".repeat(301) },
+        "summary"
+      ],
+      [
+        "com meta_description longa demais",
+        { title: "T", content: "C", meta_description: "x".repeat(161) },
+        "meta_description"
+      ],
+      ["com summary que não é string", { title: "T", content: "C", summary: 1 }, "summary"],
       ["sem title", { content: "C" }, "title"],
       ["sem content", { title: "T" }, "content"],
       ["com title vazio", { title: "   ", content: "C" }, "title"],
