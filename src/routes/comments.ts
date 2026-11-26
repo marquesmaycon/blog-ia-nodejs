@@ -2,9 +2,10 @@ import { z } from "zod"
 
 import { COMMENT_STATUSES, type CommentStatus } from "../domain/comments.ts"
 import type { App } from "../http/app.ts"
-import { requireApiKey } from "../http/auth.ts"
+import { assertApiKey } from "../http/auth.ts"
+import { HttpError, notFound } from "../http/errors.ts"
 import { createRateLimiter, type RateLimitOptions } from "../http/rate-limit.ts"
-import { sendValidationError } from "../http/validation.ts"
+import { parseBody, parseQuery } from "../http/validation.ts"
 import { draftCommentReply, type DraftReplyError } from "../services/comment-replies.ts"
 import {
   approveComment,
@@ -49,111 +50,93 @@ export type CommentRoutesOptions = { rateLimit?: RateLimitOptions }
 export function registerCommentRoutes(app: App, options: CommentRoutesOptions = {}) {
   const limiter = createRateLimiter(options.rateLimit ?? DEFAULT_COMMENTS_RATE_LIMIT)
 
-  app.get("/posts/:id/comments", async (req, res) => {
-    try {
+  app.get(
+    "/posts/:id/comments",
+    async (req) => {
       const comments = await listPostComments(req.params.id)
+      if (!comments) throw notFound("Post not found")
 
-      if (!comments) {
-        return res.status(404).send({ message: "Post not found" })
-      }
+      return { data: comments }
+    },
+    { onError: { message: "Failed to list comments", log: "Falha ao listar os comentários:" } }
+  )
 
-      return res.send({ data: comments })
-    } catch (error) {
-      console.error("Falha ao listar os comentários:", error)
-      return res.status(500).send({ message: "Failed to list comments" })
-    }
-  })
+  app.post(
+    "/posts/:id/comments",
+    async (req, res) => {
+      // Antes da validação: requisição inválida também consome a cota.
+      // É o limitador que protege os tokens gastos pelo moderador IA.
+      if (!limiter.check(req, res)) return
+      const body = parseBody(req, createCommentBodySchema)
 
-  app.post("/posts/:id/comments", async (req, res) => {
-    // Antes da validação: requisição inválida também consome a cota.
-    // É o limitador que protege os tokens gastos pelo moderador IA.
-    if (!limiter.check(req, res)) return
-
-    const parsed = createCommentBodySchema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
-
-    try {
-      const comment = await createComment(req.params.id, parsed.data)
-
-      if (!comment) {
-        return res.status(404).send({ message: "Post not found" })
-      }
+      const comment = await createComment(req.params.id, body)
+      if (!comment) throw notFound("Post not found")
 
       return res.status(201).send({ message: CREATED_MESSAGES[comment.status], data: comment })
-    } catch (error) {
-      console.error("Falha ao criar o comentário:", error)
-      return res.status(500).send({ message: "Failed to create comment" })
-    }
-  })
+    },
+    { onError: { message: "Failed to create comment", log: "Falha ao criar o comentário:" } }
+  )
 
-  app.get("/comments", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.get(
+    "/comments",
+    async (req) => {
+      assertApiKey(req)
+      const { status } = parseQuery(req, listCommentsQuerySchema)
 
-    const query = listCommentsQuerySchema.safeParse({
-      status: req.query.get("status") ?? undefined
-    })
-    if (!query.success) return sendValidationError(res, query.error, "Invalid query parameters")
-
-    try {
-      const comments = await listCommentsByStatus(query.data.status)
-      return res.send({ data: comments })
-    } catch (error) {
-      console.error("Falha ao listar os comentários por status:", error)
-      return res.status(500).send({ message: "Failed to list comments" })
-    }
-  })
-
-  app.patch("/comments/:id/approve", async (req, res) => {
-    if (!requireApiKey(req, res)) return
-
-    try {
-      const comment = await approveComment(req.params.id)
-
-      if (!comment) {
-        return res.status(404).send({ message: "Comment not found" })
+      return { data: await listCommentsByStatus(status) }
+    },
+    {
+      onError: {
+        message: "Failed to list comments",
+        log: "Falha ao listar os comentários por status:"
       }
-
-      return res.send({ message: "Comment approved", data: comment })
-    } catch (error) {
-      console.error("Falha ao aprovar o comentário:", error)
-      return res.status(500).send({ message: "Failed to approve comment" })
     }
-  })
+  )
 
-  app.post("/comments/:id/reply", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.patch(
+    "/comments/:id/approve",
+    async (req) => {
+      assertApiKey(req)
 
-    try {
+      const comment = await approveComment(req.params.id)
+      if (!comment) throw notFound("Comment not found")
+
+      return { message: "Comment approved", data: comment }
+    },
+    { onError: { message: "Failed to approve comment", log: "Falha ao aprovar o comentário:" } }
+  )
+
+  app.post(
+    "/comments/:id/reply",
+    async (req, res) => {
+      assertApiKey(req)
+
       const result = await draftCommentReply(req.params.id)
-
       if (!result.ok) {
         const { status, message } = REPLY_ERRORS[result.error]
-        return res
-          .status(status)
-          .send(result.reason ? { message, reason: result.reason } : { message })
+        throw new HttpError(status, message, result.reason ? { reason: result.reason } : undefined)
       }
 
       return res.status(201).send({ message: "Reply draft created", data: result.reply })
-    } catch (error) {
-      console.error("Falha ao criar a resposta do comentário:", error)
-      return res.status(500).send({ message: "Failed to create reply" })
-    }
-  })
-
-  app.delete("/comments/:id", async (req, res) => {
-    if (!requireApiKey(req, res)) return
-
-    try {
-      const deleted = await deleteComment(req.params.id)
-
-      if (!deleted) {
-        return res.status(404).send({ message: "Comment not found" })
+    },
+    {
+      onError: {
+        message: "Failed to create reply",
+        log: "Falha ao criar a resposta do comentário:"
       }
-
-      return res.send({ message: "Comment deleted" })
-    } catch (error) {
-      console.error("Falha ao apagar o comentário:", error)
-      return res.status(500).send({ message: "Failed to delete comment" })
     }
-  })
+  )
+
+  app.delete(
+    "/comments/:id",
+    async (req) => {
+      assertApiKey(req)
+
+      const deleted = await deleteComment(req.params.id)
+      if (!deleted) throw notFound("Comment not found")
+
+      return { message: "Comment deleted" }
+    },
+    { onError: { message: "Failed to delete comment", log: "Falha ao apagar o comentário:" } }
+  )
 }
