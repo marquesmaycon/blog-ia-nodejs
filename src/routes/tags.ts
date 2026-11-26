@@ -1,8 +1,9 @@
 import { z } from "zod"
 
 import type { App } from "../http/app.ts"
-import { requireApiKey } from "../http/auth.ts"
-import { sendValidationError } from "../http/validation.ts"
+import { assertApiKey } from "../http/auth.ts"
+import { notFound } from "../http/errors.ts"
+import { parseBody } from "../http/validation.ts"
 import { deleteTag, listTags, setPostTags } from "../services/tags.ts"
 import { slugify } from "../utils/slugify.ts"
 
@@ -20,50 +21,36 @@ const setPostTagsBodySchema = z.object({
 })
 
 export function registerTagRoutes(app: App) {
-  app.get("/tags", async (_req, res) => {
-    try {
-      const tags = await listTags()
-      return res.send({ data: tags })
-    } catch (error) {
-      console.error("Falha ao listar as tags:", error)
-      return res.status(500).send({ message: "Failed to list tags" })
-    }
+  app.get("/tags", async () => ({ data: await listTags() }), {
+    onError: { message: "Failed to list tags", log: "Falha ao listar as tags:" }
   })
 
-  app.put("/posts/:id/tags", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.put(
+    "/posts/:id/tags",
+    async (req, res) => {
+      assertApiKey(req)
+      const { tags } = parseBody(req, setPostTagsBodySchema)
 
-    const parsed = setPostTagsBodySchema.safeParse(req.body)
-    if (!parsed.success) return sendValidationError(res, parsed.error, "Invalid request body")
-
-    try {
-      const post = await setPostTags(req.params.id, parsed.data.tags)
-
-      if (!post) {
-        return res.status(404).send({ message: "Post not found" })
-      }
+      const post = await setPostTags(req.params.id, tags)
+      if (!post) throw notFound("Post not found")
 
       return res.send({ message: "Post tags updated", data: post })
-    } catch (error) {
-      console.error("Falha ao atualizar as tags do post:", error)
-      return res.status(500).send({ message: "Failed to update post tags" })
+    },
+    {
+      onError: { message: "Failed to update post tags", log: "Falha ao atualizar as tags do post:" }
     }
-  })
+  )
 
-  app.delete("/tags/:slug", async (req, res) => {
-    if (!requireApiKey(req, res)) return
+  app.delete(
+    "/tags/:slug",
+    async (req, res) => {
+      assertApiKey(req)
 
-    try {
       const deleted = await deleteTag(req.params.slug)
-
-      if (!deleted) {
-        return res.status(404).send({ message: "Tag not found" })
-      }
+      if (!deleted) throw notFound("Tag not found")
 
       return res.send({ message: "Tag deleted" })
-    } catch (error) {
-      console.error("Falha ao apagar a tag:", error)
-      return res.status(500).send({ message: "Failed to delete tag" })
-    }
-  })
+    },
+    { onError: { message: "Failed to delete tag", log: "Falha ao apagar a tag:" } }
+  )
 }
