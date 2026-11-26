@@ -42,6 +42,7 @@ describe("rotas /api/docs", () => {
       "/posts/{id}/comments",
       "/posts/{id}/likes",
       "/posts/{id}/reject",
+      "/posts/{id}/review",
       "/posts/{id}/tags",
       "/tags",
       "/tags/{slug}"

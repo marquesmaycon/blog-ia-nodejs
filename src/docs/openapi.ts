@@ -215,7 +215,8 @@ export const openApiSpec = {
       post: {
         tags: ["Posts"],
         summary: "Gera um rascunho de post a partir de uma ideia",
-        description: "Requer API key.",
+        description:
+          "Roda o workflow `post-drafting`: o agente redator escreve, o revisor dá uma nota de 0 a 10 e, abaixo de `POST_REVIEW_MIN_SCORE` (padrão 7), o redator reescreve com o feedback, até `POST_REVIEW_MAX_ATTEMPTS` (padrão 3) tentativas. A resposta pode levar vários ciclos de LLM. Se o revisor falhar, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). As revisões ficam em `GET /posts/{id}/review`. Requer API key.",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -236,10 +237,24 @@ export const openApiSpec = {
           }
         },
         responses: {
-          "201": postResponse("Post gerado e salvo como rascunho", true),
+          "201": {
+            description: "Post gerado e salvo como rascunho, com a última revisão da IA",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["message", "data"],
+                  properties: {
+                    message: { type: "string", example: "Post draft created" },
+                    data: { $ref: "#/components/schemas/PostDraft" }
+                  }
+                }
+              }
+            }
+          },
           "400": validationErrorResponse("`idea` ausente ou vazia, ou JSON inválido"),
           "403": forbiddenResponse,
-          "502": errorResponse("Falha na geração pelo modelo")
+          "502": errorResponse("Falha na geração pelo modelo redator")
         }
       }
     },
@@ -296,6 +311,47 @@ export const openApiSpec = {
           "400": validationErrorResponse("Slug em formato inválido"),
           "404": errorResponse("Nenhum post publicado com esse slug"),
           "500": errorResponse("Falha ao buscar o post")
+        }
+      }
+    },
+    "/posts/{id}/review": {
+      get: {
+        tags: ["Posts"],
+        summary: "Lista as revisões IA de um post",
+        description:
+          "Histórico das revisões feitas pelo agente `post-reviewer` durante a geração do rascunho, da primeira tentativa à última. `latest` é a revisão final, ou `null` quando o revisor não respondeu. Requer API key.",
+        parameters: [idParam],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Revisões do post (lista vazia se ele não passou pelo revisor)",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["data"],
+                  properties: {
+                    data: {
+                      type: "object",
+                      required: ["latest", "history"],
+                      properties: {
+                        latest: {
+                          oneOf: [{ $ref: "#/components/schemas/PostReview" }, { type: "null" }]
+                        },
+                        history: {
+                          type: "array",
+                          items: { $ref: "#/components/schemas/PostReview" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": forbiddenResponse,
+          "404": errorResponse("Post não encontrado"),
+          "500": errorResponse("Falha ao buscar as revisões")
         }
       }
     },
@@ -720,6 +776,47 @@ export const openApiSpec = {
                 minimum: 1,
                 description: "Só posts aprovados",
                 example: 4
+              }
+            }
+          }
+        ]
+      },
+      PostReview: {
+        type: "object",
+        required: ["id", "post_id", "attempt", "score", "issues", "suggestions", "created_at"],
+        properties: {
+          id: { type: "string", example: "Uakgb_J5m9g-0JDMbcJqL" },
+          post_id: { type: "string", example: "V1StGXR8_Z5jdHi6B-myT" },
+          attempt: {
+            type: "integer",
+            minimum: 1,
+            description: "Tentativa avaliada: 1 é a primeira versão, as seguintes são reescritas",
+            example: 2
+          },
+          score: { type: "integer", minimum: 0, maximum: 10, example: 8 },
+          issues: {
+            type: "array",
+            items: { type: "string" },
+            example: ["O exemplo de código não trata erros"]
+          },
+          suggestions: {
+            type: "array",
+            items: { type: "string" },
+            example: ["Adicione um try/catch ao exemplo de fetch"]
+          },
+          created_at: { type: "string", format: "date-time" }
+        }
+      },
+      PostDraft: {
+        allOf: [
+          { $ref: "#/components/schemas/Post" },
+          {
+            type: "object",
+            required: ["review"],
+            properties: {
+              review: {
+                description: "Última revisão da IA; null se o revisor falhou",
+                oneOf: [{ $ref: "#/components/schemas/PostReview" }, { type: "null" }]
               }
             }
           }

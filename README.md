@@ -7,7 +7,7 @@ API de blog em que os posts são escritos por IA. Você envia uma ideia, um agen
 - **Node.js 26**, que executa TypeScript nativamente (sem etapa de transpilação)
 - Servidor HTTP próprio sobre `node:http` ([src/http/app.ts](src/http/app.ts)), sem framework
 - **PostgreSQL 17** com `pg` e migrations via `postgrator-cli`
-- **Mastra** (`@mastra/core`) para os agentes redator e moderador de comentários; os modelos são configuráveis (Gemini por padrão)
+- **Mastra** (`@mastra/core`) para os agentes redator, revisor e moderador de comentários, e para o workflow que encadeia redator e revisor; os modelos são configuráveis (Gemini por padrão)
 - **Zod** para validação
 - Qualidade: `oxlint`, `oxfmt`, `commitlint` (Conventional Commits) e hooks git com `lefthook`
 
@@ -28,11 +28,14 @@ src/
 │   ├── tags.ts            # rotas de tags
 │   └── feed.ts            # feed RSS (/feed.xml)
 ├── services/              # regras de negócio (posts com geração via agente, comentários, curtidas, tags, feed)
-├── repositories/          # acesso ao Postgres (posts, comments, likes, tags)
+├── repositories/          # acesso ao Postgres (posts, post_reviews, comments, likes, tags)
 ├── utils/
 │   ├── slugify.ts         # gera slugs ASCII (ex.: "Node.js" -> "node-js")
 │   └── reading-time.ts    # estimativa de tempo de leitura (200 palavras/min)
-├── mastra/                # instância Mastra e agentes post-writer e comment-moderator
+├── mastra/
+│   ├── index.ts           # instância Mastra (registra agentes e workflows)
+│   ├── agents/            # post-writer, post-reviewer e comment-moderator
+│   └── workflows/         # post-drafting: escrever → revisar → reescrever
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
     └── migrations/        # migrations SQL (postgrator)
@@ -80,6 +83,10 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 | `POST_WRITER_MODEL`             | Modelo do agente no formato `provedor/modelo` do Mastra            | `google/gemini-2.5-flash`                         |
 | `COMMENT_MODERATOR_MODEL`       | Modelo do agente moderador de comentários                          | `google/gemini-2.5-flash`                         |
 | `COMMENT_MODERATION_TIMEOUT_MS` | Tempo máximo da moderação; ao estourar, o comentário fica pendente | `10000`                                           |
+| `POST_REVIEWER_MODEL`           | Modelo do agente revisor de rascunhos                              | `google/gemini-2.5-flash`                         |
+| `POST_REVIEW_MIN_SCORE`         | Nota mínima (0 a 10) para o rascunho não ser reescrito             | `7`                                               |
+| `POST_REVIEW_MAX_ATTEMPTS`      | Máximo de versões escritas por rascunho                            | `3`                                               |
+| `POST_REVIEW_TIMEOUT_MS`        | Tempo máximo de cada revisão; ao estourar, salva sem ela           | `30000`                                           |
 | `GOOGLE_API_KEY`                | Chave do Google AI Studio (modelos `google/*`)                     | —                                                 |
 | `GROQ_API_KEY`                  | Chave da Groq, se usar um modelo `groq/*`                          | —                                                 |
 | `DATABASE_URL`                  | Connection string do Postgres                                      | `postgres://blog:blog@localhost:5432/blog`        |
@@ -121,7 +128,7 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 }
 ```
 
-As rotas administrativas (`POST /posts/draft`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 As rotas públicas de escrita têm rate limiting em memória, por IP: `POST /posts/:id/comments` aceita 5 requisições por minuto, e `POST`/`DELETE /posts/:id/likes` dividem uma cota de 30 por minuto. As respostas trazem os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Ao estourar a cota, a rota responde `429 { message: "Too Many Requests" }` com `Retry-After` (em segundos). Atrás de um proxy reverso, defina `TRUST_PROXY=true` para que o IP venha do `X-Forwarded-For`; sem isso, o header é ignorado, porque o cliente poderia forjá-lo. Como os contadores ficam na memória, cada instância da API tem os seus, e um restart zera todos.
 
@@ -156,7 +163,13 @@ Um post é **rascunho** quando `approved_at` e `rejected_at` estão nulos. Aprov
 
 ### `POST /posts/draft`
 
-Gera um post com o agente a partir de uma ideia e o salva como rascunho.
+Gera um post a partir de uma ideia e o salva como rascunho. A geração é o workflow Mastra `post-drafting` ([src/mastra/workflows/post-drafting.ts](src/mastra/workflows/post-drafting.ts)):
+
+1. O agente `post-writer` escreve o post.
+2. O agente `post-reviewer` dá uma nota de 0 a 10 e lista `issues` e `suggestions`.
+3. Abaixo de `POST_REVIEW_MIN_SCORE`, o redator reescreve com esse feedback e o revisor avalia de novo, até `POST_REVIEW_MAX_ATTEMPTS` versões.
+
+O post e todas as revisões são gravados juntos, numa transação. A resposta traz a última revisão em `data.review`, e o histórico completo fica em `GET /posts/:id/review`. Como podem ser vários ciclos de LLM, a requisição demora mais que uma geração simples. Se o revisor falhar ou estourar `POST_REVIEW_TIMEOUT_MS`, o último rascunho é salvo sem essa revisão (`review` pode ser `null`). Se o redator falhar, nada é gravado.
 
 ```bash
 curl -X POST http://localhost:8080/posts/draft \
@@ -165,12 +178,12 @@ curl -X POST http://localhost:8080/posts/draft \
   -d '{ "idea": "Como usar AbortController em Node.js" }'
 ```
 
-| Status | Quando                                    |
-| ------ | ----------------------------------------- |
-| `201`  | Post gerado e salvo: `{ message, data }`  |
-| `400`  | `idea` ausente ou vazia, ou JSON inválido |
-| `403`  | API key ausente ou inválida               |
-| `502`  | Falha na geração pelo modelo              |
+| Status | Quando                                                      |
+| ------ | ----------------------------------------------------------- |
+| `201`  | Post gerado e salvo: `{ message, data }`, com `data.review` |
+| `400`  | `idea` ausente ou vazia, ou JSON inválido                   |
+| `403`  | API key ausente ou inválida                                 |
+| `502`  | Falha na geração pelo modelo redator                        |
 
 ### `GET /posts`
 
@@ -206,6 +219,16 @@ Retorna um post pelo id, independentemente do status.
 | ------ | ------------------- |
 | `200`  | `{ data: Post }`    |
 | `404`  | Post não encontrado |
+
+### `GET /posts/:id/review`
+
+Histórico das revisões IA do rascunho, para o admin consultar antes de aprovar. Cada item tem `attempt` (1 é a primeira versão), `score` (0 a 10), `issues`, `suggestions` e `created_at`. `latest` é a revisão final, ou `null` se o revisor nunca respondeu. Requer API key.
+
+| Status | Quando                          |
+| ------ | ------------------------------- |
+| `200`  | `{ data: { latest, history } }` |
+| `403`  | API key ausente ou inválida     |
+| `404`  | Post não encontrado             |
 
 ### `GET /posts/slug/:slug`
 
