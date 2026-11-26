@@ -28,6 +28,24 @@ function mockModerator(generate: () => Promise<unknown>) {
   return mock.method(mastra, "getAgent", (() => ({ generate })) as never)
 }
 
+// Para as respostas: o agente comment-replier devolve `reply`; os demais agentes, o moderador
+function mockReplier(reply: () => Promise<unknown>) {
+  mock.restoreAll()
+  return mock.method(mastra, "getAgent", ((id: string) => ({
+    generate:
+      id === "comment-replier"
+        ? reply
+        : async () => ({ object: { verdict: "approve", reason: "Ok", categories: [] } })
+  })) as never)
+}
+
+const approvedPost = () => seedPost({ approved_at: "2026-01-01T00:00:00.000Z" })
+
+const replierAnswer = (object: Record<string, unknown>) =>
+  mockReplier(async () => ({
+    object: { is_question: true, answerable: true, reply: "", reason: "Motivo", ...object }
+  }))
+
 const moderatorVerdict = (verdict: string, reason = "Motivo", categories: string[] = []) =>
   mockModerator(async () => ({ object: { verdict, reason, categories } }))
 
@@ -150,6 +168,125 @@ describe("E2E comentários", () => {
 
     assert.deepEqual(ids(res.body.data), [rejected.id])
     assert.equal(res.body.data[0].moderation_reason, "spam")
+  })
+
+  describe("respostas da IA (POST /comments/:id/reply)", () => {
+    it("ciclo de vida: pergunta aprovada → rascunho da IA → aprovado → público", async () => {
+      const post = await approvedPost()
+      replierAnswer({ reply: "Use `pipeline`, como mostra a seção 2." })
+
+      // 1. Leitor pergunta e o moderador aprova
+      const created = await api()
+        .post(`/posts/${post.id}/comments`)
+        .send({ author_name: "Ana", content: "Como trato erros em streams?" })
+        .expect(201)
+      const question: Comment = created.body.data
+      assert.equal(question.status, "approved")
+      assert.equal(question.author_type, "reader")
+
+      // 2. Admin pede o rascunho: fica pendente, filho da pergunta
+      const res = await api().post(`/comments/${question.id}/reply`).set(auth).expect(201)
+      const reply: Comment = res.body.data
+      assert.equal(res.body.message, "Reply draft created")
+      assert.equal(reply.parent_id, question.id)
+      assert.equal(reply.post_id, post.id)
+      assert.equal(reply.author_type, "ai")
+      assert.equal(reply.status, "pending")
+      assert.equal(reply.content, "Use `pipeline`, como mostra a seção 2.")
+
+      // 3. Fica fora da listagem pública e entra na fila de moderação
+      const unpublished = await api().get(`/posts/${post.id}/comments`).expect(200)
+      assert.deepEqual(ids(unpublished.body.data), [question.id])
+      const queue = await api().get("/comments").set(auth).expect(200)
+      assert.deepEqual(ids(queue.body.data), [reply.id])
+
+      // 4. Pedir de novo não gera outro rascunho
+      await api()
+        .post(`/comments/${question.id}/reply`)
+        .set(auth)
+        .expect(409, { message: "Reply already exists" })
+
+      // 5. Admin aprova: aparece depois da pergunta e conta no post
+      await api().patch(`/comments/${reply.id}/approve`).set(auth).expect(200)
+      const published = await api().get(`/posts/${post.id}/comments`).expect(200)
+      assert.deepEqual(ids(published.body.data), [question.id, reply.id])
+      assert.equal(published.body.data[1].parent_id, question.id)
+      const postRes = await api().get(`/posts/${post.id}`).expect(200)
+      assert.equal(postRes.body.data.comments_count, 2)
+
+      // 6. Apagar a pergunta apaga a resposta
+      await api().delete(`/comments/${question.id}`).set(auth).expect(200)
+      await api().delete(`/comments/${reply.id}`).set(auth).expect(404)
+    })
+
+    it("apagar o rascunho permite gerar outro", async () => {
+      const post = await approvedPost()
+      const question = await seedComment({ post_id: post.id, status: "approved" })
+      replierAnswer({ reply: "Primeira" })
+
+      const first = await api().post(`/comments/${question.id}/reply`).set(auth).expect(201)
+      await api().delete(`/comments/${first.body.data.id}`).set(auth).expect(200)
+
+      replierAnswer({ reply: "Segunda" })
+      const second = await api().post(`/comments/${question.id}/reply`).set(auth).expect(201)
+      assert.equal(second.body.data.content, "Segunda")
+    })
+
+    it("responde 422 quando não é pergunta, sem gravar nada", async () => {
+      const post = await approvedPost()
+      const comment = await seedComment({ post_id: post.id, status: "approved" })
+      replierAnswer({ is_question: false, answerable: false, reason: "É um elogio" })
+
+      await api().post(`/comments/${comment.id}/reply`).set(auth).expect(422, {
+        message: "Comment is not an answerable question",
+        reason: "É um elogio"
+      })
+      assert.deepEqual((await api().get("/comments").set(auth).expect(200)).body, { data: [] })
+    })
+
+    it("responde 502 quando o agente falha, sem gravar nada", async () => {
+      const post = await approvedPost()
+      const comment = await seedComment({ post_id: post.id, status: "approved" })
+      mockReplier(async () => {
+        throw new Error("provider down")
+      })
+      mock.method(console, "error", () => {})
+
+      await api()
+        .post(`/comments/${comment.id}/reply`)
+        .set(auth)
+        .expect(502, { message: "Failed to generate reply" })
+      assert.deepEqual((await api().get("/comments").set(auth).expect(200)).body, { data: [] })
+    })
+
+    it("responde 409 para comentário pendente e para uma resposta", async () => {
+      const post = await approvedPost()
+      const pending = await seedComment({ post_id: post.id })
+      const parent = await seedComment({ post_id: post.id, status: "approved" })
+      const reply = await seedComment({
+        post_id: post.id,
+        status: "approved",
+        parent_id: parent.id,
+        author_type: "ai"
+      })
+      const getAgent = replierAnswer({ reply: "Oi" })
+
+      for (const comment of [pending, reply]) {
+        await api()
+          .post(`/comments/${comment.id}/reply`)
+          .set(auth)
+          .expect(409, { message: "Comment cannot be replied" })
+      }
+      assert.equal(getAgent.mock.callCount(), 0)
+    })
+
+    it("responde 404 para comentário inexistente e 403 sem API key", async () => {
+      await api()
+        .post("/comments/inexistente/reply")
+        .set(auth)
+        .expect(404, { message: "Comment not found" })
+      await api().post("/comments/inexistente/reply").expect(403, { message: "Forbidden" })
+    })
   })
 
   describe("só posts aprovados aceitam e exibem comentários", () => {

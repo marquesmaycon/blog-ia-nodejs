@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, it, mock } from "node:test"
 import request from "supertest"
 
 import type { Comment, CommentStatus } from "../../../src/repositories/comments.ts"
+import type { DraftReplyResult } from "../../../src/services/comment-replies.ts"
 import type { CommentInput } from "../../../src/services/comments.ts"
 
 const comment: Comment = {
@@ -31,7 +32,24 @@ const services = {
   deleteComment: mock.fn(async (_id: string): Promise<boolean> => true)
 }
 
+const reply: Comment = {
+  ...comment,
+  id: "r-1",
+  author_name: "Autor do blog (IA)",
+  content: "Resposta",
+  parent_id: "c-1",
+  author_type: "ai"
+}
+
+const replies = {
+  draftCommentReply: mock.fn(async (_id: string): Promise<DraftReplyResult> => ({
+    ok: true,
+    reply
+  }))
+}
+
 mock.module(import.meta.resolve("../../../src/services/comments.ts"), { exports: services })
+mock.module(import.meta.resolve("../../../src/services/comment-replies.ts"), { exports: replies })
 
 const { createApp } = await import("../../../src/http/app.ts")
 const { registerCommentRoutes } = await import("../../../src/routes/comments.ts")
@@ -59,7 +77,7 @@ describe("rotas de comentários", () => {
 
   beforeEach(() => {
     process.env.API_KEY = "secret"
-    for (const fn of Object.values(services)) fn.mock.resetCalls()
+    for (const fn of [...Object.values(services), replies.draftCommentReply]) fn.mock.resetCalls()
     mock.method(console, "error", () => {})
   })
 
@@ -205,6 +223,11 @@ describe("rotas de comentários", () => {
         service: services.approveComment
       },
       {
+        name: "POST /comments/:id/reply",
+        send: () => request(buildServer()).post("/comments/c-1/reply"),
+        service: replies.draftCommentReply
+      },
+      {
         name: "DELETE /comments/:id",
         send: () => request(buildServer()).delete("/comments/c-1"),
         service: services.deleteComment
@@ -292,6 +315,47 @@ describe("rotas de comentários", () => {
 
       assert.equal(res.status, 500)
       assert.deepEqual(res.body, { message: "Failed to approve comment" })
+    })
+  })
+
+  describe("POST /comments/:id/reply", () => {
+    it("cria o rascunho de resposta e responde 201", async () => {
+      const res = await request(buildServer()).post("/comments/c-1/reply").set(auth)
+
+      assert.equal(res.status, 201)
+      assert.deepEqual(res.body, { message: "Reply draft created", data: reply })
+      assert.deepEqual(replies.draftCommentReply.mock.calls[0].arguments, ["c-1"])
+    })
+
+    for (const [error, status, message, reason] of [
+      ["not_found", 404, "Comment not found", undefined],
+      ["not_eligible", 409, "Comment cannot be replied", undefined],
+      ["already_replied", 409, "Reply already exists", undefined],
+      ["not_a_question", 422, "Comment is not an answerable question", "É um elogio"],
+      ["not_answerable", 422, "Comment is not an answerable question", "O post não cobre"],
+      ["generation_failed", 502, "Failed to generate reply", undefined]
+    ] as const) {
+      it(`responde ${status} para ${error}`, async () => {
+        replies.draftCommentReply.mock.mockImplementationOnce(async () => ({
+          ok: false,
+          error,
+          ...(reason ? { reason } : {})
+        }))
+
+        const res = await request(buildServer()).post("/comments/c-1/reply").set(auth)
+
+        assert.equal(res.status, status)
+        assert.deepEqual(res.body, reason ? { message, reason } : { message })
+      })
+    }
+
+    it("responde 500 quando o service falha", async () => {
+      replies.draftCommentReply.mock.mockImplementationOnce(failing)
+
+      const res = await request(buildServer()).post("/comments/c-1/reply").set(auth)
+
+      assert.equal(res.status, 500)
+      assert.deepEqual(res.body, { message: "Failed to create reply" })
     })
   })
 

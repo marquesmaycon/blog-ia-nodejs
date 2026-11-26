@@ -6,7 +6,9 @@ import {
   approveCommentById,
   deleteCommentById,
   findApprovedCommentsByPost,
+  findCommentById,
   findCommentsByStatus,
+  hasAiReply,
   insertComment
 } from "../../../src/repositories/comments.ts"
 import type { Post } from "../../../src/repositories/posts.ts"
@@ -38,7 +40,50 @@ describe("repositories/comments", () => {
       assert.equal(comment.status, "pending")
       assert.equal(comment.moderation_reason, null)
       assert.deepEqual(comment.moderation_categories, [])
+      assert.equal(comment.parent_id, null)
+      assert.equal(comment.author_type, "reader")
       assert.match(comment.created_at, ISO_DATE)
+    })
+
+    it("persiste a resposta da IA com parent_id e author_type", async () => {
+      const parent = await seedComment({ post_id: post.id, status: "approved" })
+
+      const reply = await insertComment({
+        post_id: post.id,
+        parent_id: parent.id,
+        author_type: "ai",
+        author_name: "Autor do blog (IA)",
+        content: "Resposta"
+      })
+
+      assert.equal(reply.parent_id, parent.id)
+      assert.equal(reply.author_type, "ai")
+      assert.equal(reply.status, "pending")
+    })
+
+    it("aceita só um rascunho da IA por comentário (unique index)", async () => {
+      const parent = await seedComment({ post_id: post.id, status: "approved" })
+      const reply = { post_id: post.id, parent_id: parent.id, author_name: "IA", content: "Oi" }
+
+      await insertComment({ ...reply, author_type: "ai" })
+
+      await assert.rejects(insertComment({ ...reply, author_type: "ai" }), {
+        code: "23505",
+        constraint: "comments_ai_reply_per_parent_idx"
+      })
+      // A restrição vale só para a IA
+      await insertComment(reply)
+    })
+
+    it("rejeita author_type desconhecido (CHECK)", async () => {
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO comments (id, post_id, author_name, content, author_type)
+           VALUES ('x', $1, 'Ana', 'Oi', 'admin')`,
+          [post.id]
+        ),
+        /check constraint/
+      )
     })
 
     it("persiste o veredito da moderação quando informado", async () => {
@@ -71,6 +116,30 @@ describe("repositories/comments", () => {
         insertComment({ post_id: "missing", author_name: "Ana", content: "Oi" }),
         /foreign key/
       )
+    })
+  })
+
+  describe("findCommentById", () => {
+    it("retorna o comentário ou null", async () => {
+      const seeded = await seedComment({ post_id: post.id })
+
+      assert.deepEqual(await findCommentById(seeded.id), seeded)
+      assert.equal(await findCommentById("missing"), null)
+    })
+  })
+
+  describe("hasAiReply", () => {
+    it("só considera as respostas da IA ao comentário informado", async () => {
+      const parent = await seedComment({ post_id: post.id, status: "approved" })
+      const other = await seedComment({ post_id: post.id, status: "approved" })
+      await seedComment({ post_id: post.id, parent_id: other.id, author_type: "reader" })
+
+      assert.equal(await hasAiReply(parent.id), false)
+      assert.equal(await hasAiReply(other.id), false)
+
+      await seedComment({ post_id: post.id, parent_id: parent.id, author_type: "ai" })
+
+      assert.equal(await hasAiReply(parent.id), true)
     })
   })
 
@@ -153,6 +222,15 @@ describe("repositories/comments", () => {
     it("retorna false quando o comentário não existe", async () => {
       assert.equal(await deleteCommentById("missing"), false)
     })
+  })
+
+  it("apagar o comentário apaga a resposta (ON DELETE CASCADE)", async () => {
+    const parent = await seedComment({ post_id: post.id, status: "approved" })
+    const reply = await seedComment({ post_id: post.id, parent_id: parent.id, author_type: "ai" })
+
+    await deleteCommentById(parent.id)
+
+    assert.equal(await findCommentById(reply.id), null)
   })
 
   it("apagar o post apaga os comentários (ON DELETE CASCADE)", async () => {
