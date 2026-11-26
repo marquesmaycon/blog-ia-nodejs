@@ -32,6 +32,7 @@ describe("rotas /api/docs", () => {
       "/comments",
       "/comments/{id}",
       "/comments/{id}/approve",
+      "/comments/{id}/reply",
       "/feed.xml",
       "/posts",
       "/posts/draft",

@@ -7,7 +7,7 @@ API de blog em que os posts são escritos por IA. Você envia uma ideia, um agen
 - **Node.js 26**, que executa TypeScript nativamente (sem etapa de transpilação)
 - Servidor HTTP próprio sobre `node:http` ([src/http/app.ts](src/http/app.ts)), sem framework
 - **PostgreSQL 17** com `pg` e migrations via `postgrator-cli`
-- **Mastra** (`@mastra/core`) para os agentes redator, revisor, de SEO e moderador de comentários, e para o workflow que encadeia redator, revisor e SEO; os modelos são configuráveis (Gemini por padrão)
+- **Mastra** (`@mastra/core`) para os agentes redator, revisor, de SEO, moderador de comentários e de respostas a comentários, e para o workflow que encadeia redator, revisor e SEO; os modelos são configuráveis (Gemini por padrão)
 - **Zod** para validação
 - Qualidade: `oxlint`, `oxfmt`, `commitlint` (Conventional Commits) e hooks git com `lefthook`
 
@@ -36,7 +36,7 @@ src/
 │   └── seo.ts             # limites de summary e meta_description
 ├── mastra/
 │   ├── index.ts           # instância Mastra (registra agentes e workflows)
-│   ├── agents/            # post-writer, post-reviewer, post-seo e comment-moderator
+│   ├── agents/            # post-writer, post-reviewer, post-seo, comment-moderator e comment-replier
 │   └── workflows/         # post-drafting: escrever → revisar → reescrever → SEO
 └── db/
     ├── index.ts           # pool de conexões e helper withTransaction
@@ -85,6 +85,8 @@ A API fica disponível em `http://localhost:8080`, recarregando a cada alteraç�
 | `POST_WRITER_MODEL`             | Modelo do agente no formato `provedor/modelo` do Mastra             | `google/gemini-2.5-flash`                         |
 | `COMMENT_MODERATOR_MODEL`       | Modelo do agente moderador de comentários                           | `google/gemini-2.5-flash`                         |
 | `COMMENT_MODERATION_TIMEOUT_MS` | Tempo máximo da moderação; ao estourar, o comentário fica pendente  | `10000`                                           |
+| `COMMENT_REPLIER_MODEL`         | Modelo do agente que responde comentários                           | `google/gemini-2.5-flash`                         |
+| `COMMENT_REPLY_TIMEOUT_MS`      | Tempo máximo da resposta; ao estourar, a rota responde `502`        | `20000`                                           |
 | `POST_REVIEWER_MODEL`           | Modelo do agente revisor de rascunhos                               | `google/gemini-2.5-flash`                         |
 | `POST_REVIEW_MIN_SCORE`         | Nota mínima (0 a 10) para o rascunho não ser reescrito              | `7`                                               |
 | `POST_REVIEW_MAX_ATTEMPTS`      | Máximo de versões escritas por rascunho                             | `3`                                               |
@@ -132,7 +134,7 @@ Erros de validação (`400`) também trazem `errors`, com um item por problema, 
 }
 ```
 
-As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
+As rotas administrativas (`POST /posts/draft`, `GET /posts/:id/review`, `PUT /posts/:id`, `PATCH /posts/:id/approve`, `DELETE /posts/:id/reject`, `GET /posts?include=all`, `GET /comments`, `PATCH /comments/:id/approve`, `POST /comments/:id/reply`, `DELETE /comments/:id`, `PUT /posts/:id/tags` e `DELETE /tags/:slug`) exigem o header `Authorization: Bearer $API_KEY`. Sem ele, com uma chave errada ou com a `API_KEY` não definida, respondem `403`.
 
 As rotas públicas de escrita têm rate limiting em memória, por IP: `POST /posts/:id/comments` aceita 5 requisições por minuto, e `POST`/`DELETE /posts/:id/likes` dividem uma cota de 30 por minuto. As respostas trazem os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset`. Ao estourar a cota, a rota responde `429 { message: "Too Many Requests" }` com `Retry-After` (em segundos). Atrás de um proxy reverso, defina `TRUST_PROXY=true` para que o IP venha do `X-Forwarded-For`; sem isso, o header é ignorado, porque o cliente poderia forjá-lo. Como os contadores ficam na memória, cada instância da API tem os seus, e um restart zera todos.
 
@@ -165,7 +167,7 @@ A documentação interativa (Swagger UI) fica em [`/api/docs`](http://localhost:
 
 O `slug` é único e gerado do título (ou sugerido pelo agente de SEO, ver `POST /posts/draft`). Títulos repetidos ganham sufixo (`-2`, `-3`...) e, quando o título não tem letras nem dígitos, o slug vira `post`. O `reading_time_minutes` é estimado a 200 palavras por minuto, com mínimo de 1. Os dois são gravados ao criar o post e recalculados ao editar.
 
-`likes_count`, `comments_count` e `tags` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados, e `tags` vem ordenado pelo nome.
+`likes_count`, `comments_count` e `tags` são calculados a cada consulta. `comments_count` conta apenas os comentários aprovados (incluindo as respostas da IA já aprovadas), e `tags` vem ordenado pelo nome.
 
 Um post é **rascunho** quando `approved_at` e `rejected_at` estão nulos. Aprovar e reprovar alternam o status: aprovar limpa `rejected_at` e reprovar limpa `approved_at`.
 
@@ -321,11 +323,15 @@ curl -X DELETE http://localhost:8080/posts/<id>/reject \
   "status": "pending",
   "moderation_reason": null,
   "moderation_categories": [],
+  "parent_id": null,
+  "author_type": "reader",
   "created_at": "2026-11-19T12:00:00.000Z"
 }
 ```
 
 `status` é `pending`, `approved` ou `rejected`, e só os aprovados aparecem publicamente. `moderation_reason` e `moderation_categories` (`spam`, `toxic`, `off-topic`, `harassment`, `self-promotion`, `other`) trazem a justificativa do moderador IA quando ele reprova ou manda para revisão. Aprovar manualmente limpa os dois campos. Comentários só existem em posts aprovados: para rascunhos, reprovados ou ids inexistentes, as rotas públicas respondem `404`. Apagar um post apaga os seus comentários.
+
+`parent_id` aponta para o comentário respondido (`null` no primeiro nível) e `author_type` é `reader` para leitores ou `ai` para as respostas do agente `comment-replier` (ver `POST /comments/:id/reply`). As listagens são planas, em ordem cronológica: o cliente monta as threads por `parent_id`. Apagar um comentário apaga a sua resposta.
 
 ### `POST /posts/:id/comments`
 
@@ -384,6 +390,25 @@ Aprova o comentário e limpa `moderation_reason`.
 | `200`  | `{ message: "Comment approved", data: Comment }` |
 | `403`  | API key ausente ou inválida                      |
 | `404`  | Comentário não encontrado                        |
+
+### `POST /comments/:id/reply`
+
+Pede ao agente `comment-replier` um rascunho de resposta para a pergunta do leitor. O agente recebe o título e o conteúdo do post e responde **apenas com base nele**. A resposta é gravada como comentário filho (`parent_id`), com `author_type: "ai"`, autor `Autor do blog (IA)` e status `pending`. Ela não passa pelo moderador e só fica pública depois de aprovada em `PATCH /comments/:id/approve`.
+
+Só comentários de leitores, de primeiro nível e aprovados podem ser respondidos, e cada um recebe no máximo um rascunho da IA. Para gerar de novo, apague o rascunho com `DELETE /comments/:id`.
+
+```bash
+curl -X POST http://localhost:8080/comments/<id>/reply   -H "Authorization: Bearer $API_KEY"
+```
+
+| Status | Quando                                                                                                     |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| `201`  | `{ message: "Reply draft created", data: Comment }`                                                        |
+| `403`  | API key ausente ou inválida                                                                                |
+| `404`  | Comentário não encontrado                                                                                  |
+| `409`  | `Comment cannot be replied` (não aprovado, é uma resposta ou post não publicado) ou `Reply already exists` |
+| `422`  | `{ message: "Comment is not an answerable question", reason }`: não é pergunta ou o post não a responde    |
+| `502`  | O agente falhou ou passou de `COMMENT_REPLY_TIMEOUT_MS`; nada é gravado                                    |
 
 ### `DELETE /comments/:id`
 

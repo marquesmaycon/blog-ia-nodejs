@@ -676,6 +676,46 @@ export const openApiSpec = {
           "500": errorResponse("Falha ao aprovar o comentário")
         }
       }
+    },
+    "/comments/{id}/reply": {
+      post: {
+        tags: ["Comments"],
+        summary: "Gera um rascunho de resposta da IA",
+        description:
+          "O agente `comment-replier` responde a pergunta do leitor usando apenas o conteúdo do post. A resposta é gravada como comentário filho (`parent_id`), com `author_type` `ai` e status `pending`, e só aparece publicamente depois de aprovada em `PATCH /comments/{id}/approve`. Aceita apenas comentários de leitores, de primeiro nível e aprovados, com no máximo um rascunho da IA por comentário. Para gerar de novo, apague o rascunho. Requer API key.",
+        parameters: [commentIdParam],
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "201": commentResponse("Rascunho de resposta criado (`Reply draft created`)"),
+          "403": forbiddenResponse,
+          "404": errorResponse("Comentário não encontrado"),
+          "409": errorResponse(
+            "Comentário não pode ser respondido (`Comment cannot be replied`: não aprovado, é uma resposta ou o post não está publicado) ou já tem rascunho da IA (`Reply already exists`)"
+          ),
+          "422": {
+            description:
+              "O agente concluiu que o comentário não é uma pergunta ou que o post não a responde",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["message"],
+                  properties: {
+                    message: { type: "string", example: "Comment is not an answerable question" },
+                    reason: {
+                      type: "string",
+                      description: "Justificativa do agente",
+                      example: "O comentário é um elogio, não uma pergunta"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": errorResponse("Falha ao criar a resposta"),
+          "502": errorResponse("O agente falhou ou estourou o tempo (`COMMENT_REPLY_TIMEOUT_MS`)")
+        }
+      }
     }
   },
   components: {
@@ -883,6 +923,8 @@ export const openApiSpec = {
           "status",
           "moderation_reason",
           "moderation_categories",
+          "parent_id",
+          "author_type",
           "created_at"
         ],
         properties: {
@@ -903,6 +945,15 @@ export const openApiSpec = {
               enum: ["spam", "toxic", "off-topic", "harassment", "self-promotion", "other"]
             },
             description: "Problemas apontados pelo moderador IA; vazio quando aprovado"
+          },
+          parent_id: {
+            type: ["string", "null"],
+            description: "Comentário respondido; null nos comentários de primeiro nível"
+          },
+          author_type: {
+            type: "string",
+            enum: ["reader", "ai"],
+            description: "`reader` para leitores; `ai` para respostas do agente `comment-replier`"
           },
           created_at: { type: "string", format: "date-time" }
         }
